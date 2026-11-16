@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: pouste-jizda
+    name: poustnijizda
     runtime: docker
     plan: free
     healthCheckPath: /
