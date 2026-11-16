@@ -1,0 +1,6 @@
+data/
+tts/
+__pycache__/
+.git/
+.claude/
+*.pyc

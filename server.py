@@ -502,7 +502,7 @@ if __name__ == '__main__':
             st.reconfigure(errors='replace')
         except (AttributeError, ValueError):
             pass
-    port = int(sys.argv[1]) if len(sys.argv) > 1 else 8765
+    port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT') or 8765)   # hosting (Railway…) dává port v PORT
     srv = Server(('0.0.0.0', port), Handler)
     print(f'Pouštní jízda běží na http://localhost:{port}  (z jiného PC: http://<IP tohoto PC>:{port})')
     try:
