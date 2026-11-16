@@ -265,7 +265,7 @@ const Rally = {
     cv.addEventListener('mousedown', (e) => {
       if (!inStage()) return;
       this._mDrag = true; this._mx = e.clientX; this._my = e.clientY;
-      if (document.pointerLockElement !== cv && !($('rDev') && $('rDev').style.display === 'block')) Game.lock();
+      if (document.pointerLockElement !== cv) Game.lock();
     });
     addEventListener('mouseup', () => { this._mDrag = false; });
     addEventListener('mousemove', (e) => {
@@ -422,7 +422,6 @@ const Rally = {
 
   // ---------- ovládání ----------
   key(e) {
-    if (this.active && e.code === 'F2') { e.preventDefault(); return this.devToggle(); }
     if (!this.active || this.mode !== 'stage') return;
     if (e.target && e.target.tagName === 'INPUT') return;
     if ($('settings').style.display === 'flex') return;
@@ -674,7 +673,6 @@ const Rally = {
 
   // ---------- smyčka ----------
   frame(dt) {
-    if (this.dev && this.dev.ts !== 1 && this.mode === 'stage') dt *= this.dev.ts;
     const r = Game.renderer;
     if (this.mode === 'garage') {
       this.gIdle = (this.gIdle || 0) + dt;
@@ -720,7 +718,7 @@ const Rally = {
     const me = this.my, c = me.car, tr = this.cur.tr, K = Game.keys;
     const go = this.started && !this.finished && !me.res;
     const KD = (a) => (Settings.kdown(K, a) ? 1 : 0);
-    const inp = go ? this.autoInp ? this.autoInp(c) : Object.assign(Pad.mix(KD('forward'), KD('back'), KD('left') - KD('right')), { hb: Settings.down(K, 'handbrake') })
+    const inp = go ? Object.assign(Pad.mix(KD('forward'), KD('back'), KD('left') - KD('right')), { hb: Settings.down(K, 'handbrake') })
       : { thr: 0, brk: this.started ? 0.6 : 0, steer: 0, hb: !this.started };   // před startem drží ruční (automat nepřeřadí na R)
     if (!this.started) inp.thr = Math.max(KD('forward'), Pad.thr());   // před startem můžeš vytočit motor
     if (!this.started) { c.vx = c.vz = 0; c.wF = c.wR = 0; }
@@ -838,7 +836,7 @@ const Rally = {
   },
   // px, pz = bod nárazu relativně ke středu auta (svět), n = normála ven z překážky
   damage(px, pz, nx, nz, amt, kind, speed) {
-    if (amt <= 0.3 || (this.dev && this.dev.god)) return;
+    if (amt <= 0.3) return;
     const me = this.my, c = me.car, d = c.dmg, sh = Math.sin(c.h), ch = Math.cos(c.h);
     const lx = px * ch - pz * sh, lz = px * sh + pz * ch;
     let zone = lz > 0.9 ? 'front' : lz < -0.9 ? 'rear' : lx > 0 ? 'left' : 'right';
@@ -1060,73 +1058,6 @@ const Rally = {
     }
     if (this.my.hands) this.my.hands.rig.visible = this.camMode === 'cockpit';
     cam.updateProjectionMatrix();
-  },
-
-  // ---------- dev menu (F2) ----------
-  devToggle() {
-    this.dev = this.dev || { god: false, ts: 1, auto: false };
-    let el = $('rDev');
-    if (!el) {
-      el = document.createElement('div'); el.id = 'rDev'; document.body.appendChild(el);
-      el.addEventListener('click', (e) => { const b = e.target.closest('button[data-dv]'); if (b) this.devAct(b.dataset.dv); });
-      el.addEventListener('keydown', (e) => { if (e.code !== 'F2') e.stopPropagation(); });
-    }
-    el.style.display = el.style.display === 'block' ? 'none' : 'block';
-    if (el.style.display === 'block') { this.devRender(); if (document.pointerLockElement) document.exitPointerLock(); }
-  },
-  devRender() {
-    const el = $('rDev'), sv = this.sv, D = this.dev, st = this.mode === 'stage', on = (b) => b ? ' on' : '';
-    const B = (id, t, cls) => `<button data-dv="${id}" class="${cls || ''}">${t}</button>`;
-    let h = `<div class="dvH">🛠 DEV MENU – RALLY <span>F2 zavře</span></div>`;
-    h += `<div class="dvS">Profil · ${sv.money.toLocaleString('cs-CZ')} Kč · lvl ${sv.lvl} · etapa ${(sv.stage || 0) + 1}</div><div class="dvG">`;
-    h += B('money', '+10 000 Kč') + B('lvl', '+1 level') + B('unlock', 'Odemknout všechny díly') + B('stagePrev', '◀ etapa') + B('stageNext', 'etapa ▶') + B('stageGo', 'Etapa číslo…') + '</div>';
-    h += `<div class="dvS">Jízda${st ? '' : ' (jen během etapy)'}</div><div class="dvG">`;
-    h += B('god', 'Nesmrtelnost', on(D.god)) + B('carCol', 'Kolize aut', on(D.carCol !== false)) + B('aiRace', 'Závod s AI') + B('auto', 'Autopilot', on(D.auto)) + B('repair', 'Opravit auto') + B('fwd', 'Skok +200 m') + B('cones', 'Kužely +5') + B('cone20', 'Kužely = 20') + B('finish', 'Dojet do cíle') + B('break', 'Rozbít auto');
-    h += '</div><div class="dvS">Čas</div><div class="dvG">' + [0.25, 0.5, 1, 2].map(v => B('ts:' + v, v + '×', on(D.ts === v))).join('') + '</div>';
-    h += '<div class="dvS">Hlas spolujezdce</div><div class="dvG">' + B('voice', '🔊 Test hlasu') + B('voiceNet', '🌐 Test online hlasu') + '</div>';
-    const v = window.speechSynthesis ? this.czVoice() : null;
-    h += `<div class="dvS" style="font-weight:400">Hlas: ${v && this.isMale(v) ? 'prohlížeč – ' + String(v.name).replace(/[<>&]/g, '') : this._srvTts !== false ? (this.voiceKind === 'male' ? 'server – mužský hlas Piper' : this.voiceKind === 'shifted' ? 'server – přeladěný ženský (chybí Piper)' : 'server') : v ? 'prohlížeč (posazený níž) – ' + String(v.name).replace(/[<>&]/g, '') : 'online napřímo'}${this._srvTts === false ? ' · server hlas nedává (restartuj server.py)' : ''}</div>`;
-    if (st) { const c = this.my.car, tr = this.cur.tr; h += `<div class="dvS" style="font-weight:400">${tr.stage.name} · ${Math.round(this.sProg)}/${Math.round(tr.len)} m · par ${tr.par.toFixed(1)} s · objektů ${tr.objs.length} · kuželů ${tr.coneN} · ${this.ais ? `AI ${this.ais.filter(a => !a.gone).length} · ` : ''}${c ? Math.round(c.speed * 3.6) + ' km/h' : ''}</div>`; }
-    el.innerHTML = h;
-  },
-  devAct(a) {
-    const sv = this.sv, D = this.dev, st = this.mode === 'stage', me = this.my, c = st && me ? me.car : null;
-    if (a === 'money') sv.money += 10000;
-    else if (a === 'lvl') { sv.xp = 0; sv.lvl++; }
-    else if (a === 'unlock') { for (const cat of RALLY_CATS) { sv.own[cat.id] = cat.items.map((_, i) => i); sv.lvl = Math.max(sv.lvl, ...cat.items.map(it => it.lvl || 1)); } sv.lookOwn = RALLY_LOOK.map(l => l[0]); }
-    else if (a === 'stagePrev') sv.stage = Math.max(0, (sv.stage || 0) - 1);
-    else if (a === 'stageNext') sv.stage = (sv.stage || 0) + 1;
-    else if (a === 'stageGo') { const n = parseInt(prompt('Číslo etapy (1 a víc):', String((sv.stage || 0) + 1)), 10); if (n > 0) sv.stage = n - 1; }
-    else if (a === 'god') D.god = !D.god;
-    else if (a === 'carCol') D.carCol = D.carCol === false;
-    else if (a === 'aiRace') { this.startSolo(sv.stage || 0, true); }
-    else if (a === 'auto') { D.auto = !D.auto; this.autoInp = D.auto ? (car) => this.devPilot(car) : null; }
-    else if (a.startsWith('ts:')) D.ts = +a.slice(3);
-    else if (a === 'voice') { this._srvTts = undefined; this.say('Levá 3 dlouhá, utahuje se, 100'); }
-    else if (a === 'voiceNet') { this._ttsFail = 0; this.netSpeak('Pravá 4, přes horizont, 150'); }
-    else if (c) {
-      if (a === 'repair') {
-        const d = c.dmg; d.front = d.rear = d.left = d.right = d.engine = 0; d.wheel = [0, 0, 0, 0];
-        for (let i = 0; i < 4; i++) if (d.off[i]) { this.attachWheel(me, i); d.wheel[i] = 0; }
-      } else if (a === 'fwd') {
-        const tr = this.cur.tr, p = tr.pts[Math.min(tr.pts.length - 2, Math.round((this.sProg + 200) / RT_STEP))];
-        c.reset(p.x, p.z, Math.PI - p.t, p.y); this.sProg = p.s; this._cp = null;
-      } else if (a === 'cones') this.cones += 5;
-      else if (a === 'cone20') this.cones = RALLY_CONE_GOAL;
-      else if (a === 'finish') { if (!this.started) this.started = true; this.finish(false); }
-      else if (a === 'break') { const d = c.dmg; d.front = 80; d.engine = 70; this.damage(0, 0, 0, 1, 0.01); for (const n of ['fbump', 'hood', 'rbump', 'wing', 'mirL', 'mirR']) if (!(d.lost || (d.lost = [])).includes(n)) { d.lost.push(n); this.detachPart(me, n); } this.detachWheel(me, 1, true); }
-    }
-    this.store(); if (this.mode === 'garage') this.renderGarage();
-    Sfx.click(); this.devRender();
-  },
-  // autopilot pro dev menu: jede po trati, brzdí podle zakřivení před sebou
-  devPilot(c) {
-    const tr = this.cur.tr, nr = RallyTrack.nearest(tr, c.x, c.z); if (!nr) return { thr: 0, brk: 1, steer: 0, hb: false };
-    const v = c.speed, P = tr.pts, q = P[Math.min(P.length - 1, Math.round((nr.s + 6 + v * 0.55) / RT_STEP))];
-    const lx = q.x - c.x, lz = q.z - c.z, fwd = lx * Math.sin(c.h) + lz * Math.cos(c.h), left = lx * Math.cos(c.h) - lz * Math.sin(c.h);
-    let k = 0; for (let i = Math.round(nr.s / RT_STEP); i < Math.min(P.length, Math.round((nr.s + 20 + v * v / 9) / RT_STEP)); i++) k = Math.max(k, Math.abs(P[i].k));
-    const vt = Math.min(45, Math.sqrt(0.6 * 9.81 / Math.max(k, 1e-4)));
-    return { thr: v < vt ? 1 : 0, brk: v > vt + 1.5 ? 0.8 : 0, steer: U.clamp(Math.atan2(left, fwd) * 2.2, -1, 1), hb: false };
   },
 
   // ---------- přístroje ----------
