@@ -8,7 +8,7 @@ const ACTIONS = [
   ['radio', 'Rádio zap/vyp', 'KeyM'], ['radioNext', 'Rádio: další stanice', 'KeyN'], ['nitro', 'Drag: nitro', 'ShiftLeft'], ['rocket', 'Drag: raketa', 'KeyE'], ['camera', 'Drag: kamera', 'KeyV'],
 ];
 const SETTINGS_DEF = {
-  v: 4, sens: 1, invertY: false, rawMouse: true, fov: 75, master: 80, engine: 100, radio: 60, viewDist: 6, shadows: 'low', scale: 100, mirrors: true, help: true, fps: false, bob: true,
+  v: 4, sens: 1, invertY: false, rawMouse: true, fov: 75, master: 80, engine: 100, radio: 60, viewDist: 6, shadows: 'low', scale: 100, mirrors: true, autoRes: true, help: true, fps: false, bob: true,
   keys: Object.fromEntries(ACTIONS.map(a => [a[0], a[2]])),
 };
 const Settings = {
@@ -36,6 +36,7 @@ const Settings = {
     const s = this.s, G = window.Game;
     if (!G || !G.renderer) return;
     const r = G.renderer;
+    G._arK = 1;   // automatické rozlišení začne znovu od plného
     r.setPixelRatio(Math.min(window.devicePixelRatio, s.scale / 100));   // 100 % = 1 pixel na bod obrazovky (na retina/125% displejích výrazně rychlejší)
     r.setSize(innerWidth, innerHeight);
     const sun = G.lights.sun, on = s.shadows !== 'off';
@@ -73,7 +74,7 @@ const Settings = {
     h += '<h3>Myš a pohled</h3>' + range('sens', 'Citlivost myši', 0.2, 3, 0.05, s.sens, '×') + check('invertY', 'Obrátit osu Y') + check('rawMouse', 'Surový vstup myši (doporučeno – bez akcelerace a bez skoků)') + range('fov', 'Zorné pole (FOV)', 60, 105, 1, s.fov, '°') + check('bob', 'Houpání kamery při chůzi');
     h += '<h3>Grafika</h3>' + select('viewDist', 'Dohlednost', [[3, 'Krátká (rychlé)'], [4, 'Nižší'], [5, 'Střední'], [6, 'Vysoká'], [7, 'Maximální']])
       + select('shadows', 'Stíny', [['off', 'Vypnuté'], ['low', 'Nízké'], ['high', 'Vysoké (ostré)']]) + range('scale', 'Rozlišení vykreslování (víc = ostřejší, pomalejší)', 50, 200, 5, s.scale, ' %')
-      + check('mirrors', 'Zrcátka v autě') + check('fps', 'Ukazovat FPS');
+      + check('autoRes', 'Automaticky snížit rozlišení, když klesnou FPS') + check('mirrors', 'Zrcátka v autě') + check('fps', 'Ukazovat FPS');
     h += '<h3>Zvuk</h3>' + range('master', 'Celková hlasitost', 0, 100, 1, s.master, ' %') + range('engine', 'Hlasitost motoru', 0, 150, 1, s.engine, ' %') + range('radio', 'Hlasitost rádia', 0, 100, 1, s.radio, ' %');
     h += '<h3>Rozhraní</h3>' + check('help', 'Nápověda s klávesami');
     if (typeof Pad !== 'undefined') h += Pad.settingsHTML();

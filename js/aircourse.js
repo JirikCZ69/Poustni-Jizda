@@ -243,7 +243,7 @@ const AirCourse = {
     const m = new THREE.MeshLambertMaterial({ vertexColors: true }), tex = this.detailTex();
     const k = T.biome === 'canyon' ? [0.68, 0.3, 0.26, 0.08] : T.biome === 'alpine' ? [0.7, 0.32, 0.22, 0.1] : [0.72, 0.3, 0.2, 0.08];
     m.onBeforeCompile = (sh) => {
-      sh.uniforms.dTex = { value: tex };
+      sh.uniforms.dTex = { value: tex }; sh.uniforms.ntNoise = { value: U.ntTex() };
       sh.vertexShader = sh.vertexShader.replace('#include <common>', `#include <common>
 varying vec3 vWp; varying vec3 vWn; varying float vDst;`).replace('#include <begin_vertex>', `#include <begin_vertex>
 vWp = transformed; vWn = objectNormal;`).replace('#include <project_vertex>', `#include <project_vertex>

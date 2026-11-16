@@ -618,7 +618,9 @@ const Game = {
   // ---------------- smyčka ----------------
   loop() {
     requestAnimationFrame(() => this.loop());
-    const dt = this.smoothDt(this.clock.getDelta());
+    const rawDt = this.clock.getDelta();
+    this.autoRes(rawDt);
+    const dt = this.smoothDt(rawDt);
     if (Sfx.ctx && !Radio.ready) Radio.init();
     this._rwT = (this._rwT || 0) - dt; if (this._rwT <= 0) { this._rwT = 1; this.renderRadioW(); }
     if (Drag.active) { Weather.silence(); Drag.frame(dt); return; }
@@ -633,6 +635,25 @@ const Game = {
     this.renderer.shadowMap.needsUpdate = true;
     this.renderer.render(this.scene, this.camera);
     if (this.inCar && this.playing) this.renderMirrors();
+  },
+  // automatické rozlišení: když grafika nestíhá (pod ~52 FPS), sníží se rozlišení vykreslování (max. na 55 %),
+  // jakmile je rezerva, pomalu se vrací zpátky. Ve hře se tak netrhá obraz, jen je chvíli o něco méně ostrý.
+  autoRes(raw) {
+    if (!Settings.s.autoRes) { if (this._arK && this._arK !== 1) { this._arK = 1; Settings.apply && Settings.apply(); } return; }
+    if (document.hidden || raw <= 0 || raw > 0.25) return;   // skryté okno / jednorázový zásek se nepočítá
+    this._arS = (this._arS || 0) + raw; this._arN = (this._arN || 0) + 1;
+    if (this._arS < 1.2) return;
+    const avg = this._arS / this._arN; this._arS = this._arN = 0;
+    let k = this._arK || 1;
+    const now = performance.now();
+    if (avg > 1 / 52 && k > 0.56) { k = Math.max(0.55, k - (avg > 1 / 35 ? 0.15 : 0.08)); this._arUp = 0; this._arHold = now + 12000; }   // po snížení chvíli nezvyšovat (nehoupat ostrostí)
+    else if (avg < 1 / 57 && k < 1 && now > (this._arHold || 0)) { if (++this._arUp >= 3) { k = Math.min(1, k + 0.05); this._arUp = 0; } }
+    else this._arUp = 0;
+    if (k !== (this._arK || 1)) {
+      this._arK = k = Math.round(k * 100) / 100;
+      this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, Settings.s.scale / 100) * k);
+      this.renderer.setSize(innerWidth, innerHeight);
+    }
   },
   // vyhlazený krok: rozptyl časů mezi snímky (16,2 / 17,1 / 15,9 ms…) dělá „sekání“ – auto se posune pokaždé o jinak velký kus,
   // i když monitor ukazuje snímky pravidelně. Použije se průměr; skutečný čas se dohání po malých kouscích (nic se neztratí).

@@ -172,12 +172,23 @@ U.store = {
 // Technika podle I. Quíleze („texture no tile“): textura se čte dvakrát s náhodným posunutím, které se plynule mění
 // podle nízkofrekvenčního šumu; přechody jsou tam, kde má druhý vzorek nulovou váhu, takže nevznikají švy.
 // Navíc velké světlé/tmavé skvrny, aby plocha z dálky nebyla jednolitá.
+// šum pro míchání variant: místo 4 hashů se sin() na každé volání stačí jedno čtení malé textury (hardwarová interpolace)
+// → výrazně levnější pixelový shader terénu (na slabších grafikách to dělalo ~20 % času snímku)
+U.ntTex = () => {
+  if (U._ntTex) return U._ntTex;
+  const N = 64, d = new Uint8Array(N * N * 4);
+  for (let i = 0; i < N * N * 4; i++) d[i] = Math.floor(U.hash(i % (N * 4), Math.floor(i / (N * 4)), 913) * 255.99);
+  const t = U._ntTex = new THREE.DataTexture(d, N, N, THREE.RGBAFormat);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping; t.magFilter = THREE.LinearFilter; t.minFilter = THREE.LinearFilter; t.generateMipmaps = false;
+  t.needsUpdate = true;
+  return t;
+};
 U.NT_GLSL = `
-float ntH(vec2 p) { p = mod(p, 289.0); return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }   // mod: přesnost sin() i daleko od počátku
-float ntN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
-  return mix(mix(ntH(i), ntH(i + vec2(1.0, 0.0)), f.x), mix(ntH(i + vec2(0.0, 1.0)), ntH(i + vec2(1.0, 1.0)), f.x), f.y); }
+uniform sampler2D ntNoise;
+float ntN(vec2 p) { return texture2D(ntNoise, (p + 0.5) / 64.0).r; }
 vec4 texNT(sampler2D s, vec2 uv) {
-  float l = (ntN(uv * 0.37) * 0.6 + ntN(uv * 0.11 + 5.3) * 0.4) * 9.0;
+  vec4 nn = texture2D(ntNoise, (uv * 0.37 + 0.5) / 64.0), nm = texture2D(ntNoise, (uv * 0.11 + 5.8) / 64.0);
+  float l = (nn.r * 0.6 + nm.g * 0.4) * 9.0;
   float f = fract(l), ia = floor(l + 0.5), ib = floor(l);
   f = min(f, 1.0 - f) * 2.0;
   vec2 offa = sin(vec2(3.0, 7.0) * ia), offb = sin(vec2(3.0, 7.0) * ib);
@@ -187,13 +198,14 @@ vec4 texNT(sampler2D s, vec2 uv) {
   vec4 d = a - b;
   return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * (d.r + d.g + d.b)));
 }
-float ntMacro(vec2 uv) { return 0.86 + 0.28 * (ntN(uv * 0.045 + 1.7) * 0.65 + ntN(uv * 0.13 + 9.1) * 0.35); }
+float ntMacro(vec2 uv) { return 0.86 + 0.28 * (texture2D(ntNoise, (uv * 0.045 + 2.2) / 64.0).b * 0.65 + texture2D(ntNoise, (uv * 0.13 + 9.6) / 64.0).a * 0.35); }
 `;
 // přepne mapu materiálu na čtení bez opakování (zachová případný vlastní onBeforeCompile)
 U.noTile = (mat, macro = true) => {
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (sh, r) => {
     if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev(sh, r);
+    sh.uniforms.ntNoise = { value: U.ntTex() };
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + U.NT_GLSL)
       .replace('#include <map_fragment>', `#ifdef USE_MAP
   vec4 texelColor = texNT(map, vUv);
