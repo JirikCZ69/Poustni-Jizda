@@ -30,8 +30,8 @@ const World = {
     this.dirtC = new THREE.Color(0x9c8162);
     this.roadBuiltTo = 0;
     this.roadGroup = new THREE.Group(); scene.add(this.roadGroup);
-    this.roadMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('asphalt') });
-    this.groundMat = new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('ground') });
+    this.roadMat = U.noTile(new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('asphalt') }));
+    this.groundMat = U.noTile(new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('ground') }));
     this.gen = { x: 0, z: 0, t: 0, k: 0, tk: 0, seg: 90, s: 0, nextHouse: 380, nextObs: 450, nextTrader: 2600, nextJunk: 1500 };
     this.addRoadPoint();
     this.extendRoad(1800);
@@ -324,6 +324,7 @@ float dwF(vec2 p) { return dwN(p) * 0.5 + dwN(p * 2.07 + 3.1) * 0.25 + dwN(p * 4
     diffuseColor.a *= clamp(a, 0.0, 1.0) * mix(0.93, 0.85, onRoad);
   }`);
     };
+    U.noTile(mat);   // stejné čtení textury jako terén pod cestou → zrno navazuje
     const m = new THREE.Mesh(geo, mat);
     m.receiveShadow = true; m.renderOrder = 1;
     this.roadGroup.add(m);

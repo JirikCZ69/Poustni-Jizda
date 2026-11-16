@@ -6,7 +6,7 @@ const AirCockpit = {
   W: 1024, H: 384,   // plátno přístrojové desky
   // rozměry kokpitu (souřadnice těla: x vpravo, y nahoru, z dozadu)
   dims(id) {
-    if (id === 'cmelak') return { D: 0.62, PW: 1.0, PH: 0.33, hw: 0.5, floor: -0.36, sill: 0.42, roof: 1.27, ctl: 'yoke', wall: 0x8c8474, wall2: 0x6e675a, panel: '#34363a', seat: 0x5a4a3a, suit: 0x3a4a5a };
+    if (id === 'cmelak') return { D: 0.62, PW: 1.0, PH: 0.33, hw: 0.5, floor: -0.36, sill: 0.42, roof: 1.15, ctl: 'yoke', wall: 0x8c8474, wall2: 0x6e675a, panel: '#34363a', seat: 0x5a4a3a, suit: 0x3a4a5a };
     if (id === 'sokol') return { D: 0.6, PW: 0.76, PH: 0.31, hw: 0.4, floor: -0.32, sill: 0.5, ctl: 'stick', wall: 0x3c3f45, wall2: 0x2a2c30, panel: '#202226', seat: 0x2a2a2a, suit: 0x8a2a2a };
     return { D: 0.64, PW: 0.88, PH: 0.33, hw: 0.58, floor: -0.28, sill: 0.74, ctl: 'stick', wall: 0x5f6b55, wall2: 0x48523f, panel: '#1c1c1e', seat: 0x4a3a2a, suit: 0x4a5a3a };
   },
@@ -64,7 +64,7 @@ const AirCockpit = {
     box(d.hw * 2, 0.03, Math.max(0.6, EZ + 0.7 - pz), 0, d.floor, (pz + EZ + 0.7) / 2, 0x26272a);
     // bočnice: dolní část až po parapet, nahoře lišta
     for (const s of [-1, 1]) {
-      const z0 = pz - 0.05, z1 = EZ + 0.75, zl = z1 - z0;
+      const z0 = pz - 0.05, z1 = id === 'cmelak' ? EZ + 0.95 : EZ + 0.75, zl = z1 - z0;
       box(0.03, d.sill - d.floor, zl, s * d.hw, (d.sill + d.floor) / 2, (z0 + z1) / 2, d.wall);
       for (let k = 0; k < 4; k++) box(0.012, d.sill - d.floor - 0.06, 0.025, s * (d.hw - 0.02), (d.sill + d.floor) / 2, z0 + 0.15 + k * zl / 4, d.wall2);   // výztuhy
       rod([s * (d.hw - 0.01), d.sill, z0], [s * d.hw - s * 0.01, d.sill, z1], 0.022, 0x2a2a2c);
@@ -72,12 +72,48 @@ const AirCockpit = {
       const wsTop = id === 'cmelak' ? d.roof : EY + 0.32;
       rod([s * (d.PW / 2 + 0.05), gy + 0.02, gz - 0.2], [s * (d.PW / 2 - 0.02), wsTop, gz - (id === 'cmelak' ? 0.05 : -0.25)], 0.022, 0x1c1c1c);
     }
-    if (id === 'cmelak') {   // kabina hornoplošníku: strop, dveřní sloupky, horní rám oken
-      box(d.hw * 2, 0.03, 1.5, 0, d.roof, EZ - 0.1, 0xb8b0a0);
+    const glassM = new THREE.MeshPhongMaterial({ color: 0xd8ecff, transparent: true, opacity: 0.07, shininess: 160, specular: 0xffffff, depthWrite: false, side: THREE.DoubleSide });
+    if (id === 'cmelak') {   // kabina hornoplošníku: strop, dveře s okny, sloupky, zadní přepážka
+      const zr = EZ + 0.95, zf = pz - 0.2;
+      box(d.hw * 2, 0.03, zr - zf, 0, d.roof, (zr + zf) / 2, 0xb8b0a0);                       // čalouněný strop
+      for (let k = 1; k < 4; k++) box(d.hw * 2 - 0.04, 0.012, 0.03, 0, d.roof - 0.02, zf + k * (zr - zf) / 4, 0x9a9282);   // švy čalounění
+      box(0.14, 0.03, 0.08, 0, d.roof - 0.025, EZ + 0.35, 0xe8e4d8); box(0.1, 0.012, 0.05, 0, d.roof - 0.04, EZ + 0.35, 0xfff6d0);   // stropní světlo
+      rod([-(d.PW / 2 - 0.02), d.roof - 0.02, gz - 0.05], [d.PW / 2 - 0.02, d.roof - 0.02, gz - 0.05], 0.03, 0x6e675a);   // horní rám čelního skla
+      rod([0, gy + 0.02, gz - 0.16], [0, d.roof - 0.02, gz - 0.05], 0.012, 0x3a3a3a);   // střední vzpěra skla
+      box(d.hw * 2, d.roof - d.floor, 0.04, 0, (d.roof + d.floor) / 2, zr, d.wall2);   // zadní přepážka (zavazadlový prostor)
+      for (let k = 0; k < 4; k++) rod([-d.hw + 0.06, d.sill + 0.06 + k * 0.1, zr - 0.03], [d.hw - 0.06, d.sill + 0.06 + k * 0.1, zr - 0.03], 0.005, 0x2a2a2a);   // síť na zavazadla
       for (const s of [-1, 1]) {
-        rod([s * d.hw, d.sill, EZ + 0.55], [s * d.hw, d.roof, EZ + 0.55], 0.03, 0x6e675a);
-        rod([s * d.hw, d.roof - 0.02, pz - 0.2], [s * d.hw, d.roof - 0.02, EZ + 0.7], 0.025, 0x6e675a);
-        box(0.06, 0.12, 0.28, s * (d.hw - 0.05), d.roof - 0.08, EZ - 0.05, 0x9a9282, 0.15);   // sluneční clona
+        rod([s * d.hw, d.sill, EZ + 0.55], [s * d.hw, d.roof, EZ + 0.55], 0.03, 0x6e675a);     // dveřní sloupek
+        rod([s * d.hw, d.sill, zr - 0.03], [s * d.hw, d.roof, zr - 0.03], 0.035, 0x6e675a);    // zadní sloupek
+        rod([s * d.hw, d.roof - 0.02, zf], [s * d.hw, d.roof - 0.02, zr], 0.025, 0x6e675a);     // horní rám oken
+        box(0.06, 0.12, 0.28, s * (d.hw - 0.05), d.roof - 0.08, EZ - 0.05, 0x9a9282, 0.15);     // sluneční clona
+        box(0.07, 0.05, 0.34, s * (d.hw - 0.045), d.sill - 0.06, EZ + 0.08, 0x5a5348);           // loketní opěrka na dveřích
+        box(0.02, 0.025, 0.09, s * (d.hw - 0.025), d.sill - 0.16, EZ - 0.18, 0xb8b8b8);         // klika
+        box(0.012, 0.16, 0.42, s * (d.hw - 0.018), (d.sill + d.floor) / 2 + 0.05, EZ - 0.05, 0x7a7262);   // kapsa na mapy
+        // boční okna (dveře + zadní okno)
+        const win = new THREE.Mesh(new THREE.PlaneGeometry(zr - zf, d.roof - d.sill), glassM);
+        win.rotation.y = Math.PI / 2; win.position.set(s * (d.hw + 0.01), (d.roof + d.sill) / 2, (zr + zf) / 2); grp.add(win);
+      }
+      const ws = new THREE.Mesh(new THREE.PlaneGeometry(d.PW, d.roof - gy), glassM);   // čelní sklo
+      ws.position.set(0, (d.roof + gy) / 2, gz - 0.13); ws.rotation.x = Math.atan2(0.15, d.roof - gy); grp.add(ws);
+    } else {
+      // stíhací kabina: překryt zevnitř (jemný odlesk), opěrka hlavy, pancíř/přepážka za pilotem, polstrované lišty
+      if (o.glass) { const gi = new THREE.Mesh(o.glass.geometry, glassM); gi.position.copy(o.glass.position); gi.rotation.copy(o.glass.rotation); gi.renderOrder = 2; grp.add(gi); }
+      const zb = EZ + 0.75;
+      box(d.hw * 2, d.sill + 0.12 - d.floor, 0.05, 0, (d.sill + 0.12 + d.floor) / 2, zb, d.wall2);           // zadní přepážka
+      box(0.46, 0.5, 0.035, 0, EY - 0.12, EZ + 0.5, id === 'strela' ? 0x4a4c48 : 0x303236, -0.12);           // pancíř / opěrná deska
+      box(0.24, 0.2, 0.09, 0, EY + 0.02, EZ + 0.46, d.seat, -0.1);                                            // opěrka hlavy
+      for (const s of [-1, 1]) {
+        box(0.07, 0.05, zb - pz, s * (d.hw - 0.035), d.sill + 0.015, (zb + pz) / 2, 0x2a2a2c);              // polstrovaná lišta rámu
+        rod([s * (d.hw - 0.02), d.sill + 0.04, EZ + 0.1], [s * (d.hw - 0.02), d.sill + 0.04, EZ + 0.4], 0.012, 0xb8b8b8);   // madlo překrytu
+        box(0.12, 0.012, 0.012, s * 0.12, EY - 0.3, EZ + 0.36, 0x6a5a30, 0.6);                                // ramenní pásy (konce u opěrky)
+      }
+      // pravá stěna: rádio, levá: trim kolečko
+      box(0.03, 0.12, 0.2, d.hw - 0.03, d.sill - 0.2, EZ + 0.18, 0x1e1e20); box(0.005, 0.03, 0.08, d.hw - 0.046, d.sill - 0.17, EZ + 0.18, 0x30d070);
+      box(0.06, 0.12, 0.12, -(d.hw - 0.06), d.sill - 0.22, EZ + 0.05, 0x26272a); box(0.012, 0.1, 0.1, -(d.hw - 0.1), d.sill - 0.2, EZ + 0.05, 0x111111);
+      if (id === 'strela') {
+        box(0.1, 0.1, 0.1, d.hw - 0.08, d.sill - 0.3, EZ - 0.1, 0x3a5a2a);   // kyslíkový regulátor
+        rod([d.hw - 0.08, d.sill - 0.3, EZ - 0.05], [0.12, EY - 0.5, EZ + 0.2], 0.014, 0x2a2a2a);   // hadice
       }
     }
     // sedačka

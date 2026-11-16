@@ -561,10 +561,10 @@ const Drag = {
     sc.add(sun); sc.add(sun.target);
     const W = n * LANE_W + 3, L0 = -90, L1 = 820, len = L1 - L0;
     const gt = Tex.get('ground').clone(); gt.needsUpdate = true; gt.repeat.set(300, 300);
-    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), new THREE.MeshLambertMaterial({ color: 0xe0c08a, map: gt }));
+    const ground = new THREE.Mesh(new THREE.PlaneGeometry(4000, 4000), U.noTile(new THREE.MeshLambertMaterial({ color: 0xe0c08a, map: gt })));
     ground.rotation.x = -Math.PI / 2; ground.position.y = -0.03; ground.receiveShadow = true; sc.add(ground);
     const at = Tex.get('asphalt').clone(); at.needsUpdate = true; at.repeat.set(W / 7.2, len / 7.2);
-    const track = new THREE.Mesh(new THREE.PlaneGeometry(W, len), new THREE.MeshLambertMaterial({ color: 0x8a8682, map: at }));
+    const track = new THREE.Mesh(new THREE.PlaneGeometry(W, len), U.noTile(new THREE.MeshLambertMaterial({ color: 0x8a8682, map: at }), false));
     track.rotation.x = -Math.PI / 2; track.position.set(0, 0, (L0 + L1) / 2); track.receiveShadow = true; sc.add(track);
     const flat = (w, l, x, z, col, op, y) => { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), new THREE.MeshBasicMaterial({ color: col, transparent: op < 1, opacity: op, depthWrite: op >= 1 })); m.rotation.x = -Math.PI / 2; m.position.set(x, y || 0.012, z); sc.add(m); return m; };
     for (let i = 0; i < n; i++) {

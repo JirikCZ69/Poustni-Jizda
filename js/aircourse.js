@@ -228,8 +228,11 @@ const AirCourse = {
     };
     for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
       let a = 0, b = 0, w = 0, amp = 1;
-      for (let o = 0; o < 5; o++) { const p = 4 << o, k = p / S; a += per(x * k, y * k, p, 7 + o) * amp; b += per(x * k, y * k, p, 31 + o) * amp; w += amp; amp *= 0.55; }
-      const i = (y * S + x) * 4; d[i] = a / w * 255; d[i + 1] = b / w * 255; d[i + 2] = U.hash(x, y, 99) * 255; d[i + 3] = 255;
+      // nejhrubší oktáva má 8 buněk na dlaždici (dřív 4 → z výšky byla vidět pravidelná mřížka skvrn)
+      let c = 0, wc = 0, ac = 1;
+      for (let o = 0; o < 5; o++) { const p = 8 << o, k = p / S; a += per(x * k, y * k, p, 7 + o) * amp; b += per(x * k, y * k, p, 31 + o) * amp; w += amp; amp *= 0.6; }
+      for (let o = 0; o < 3; o++) { const p = 32 << o, k = p / S; c += per(x * k, y * k, p, 61 + o) * ac; wc += ac; ac *= 0.6; }   // jemné zrno (dřív bílý šum = moaré)
+      const i = (y * S + x) * 4; d[i] = a / w * 255; d[i + 1] = b / w * 255; d[i + 2] = c / wc * 255; d[i + 3] = 255;
     }
     g.putImageData(img, 0, 0);
     const t = this._dTex = new THREE.CanvasTexture(cv);
@@ -248,28 +251,23 @@ vDst = -mvPosition.z;`);
       sh.fragmentShader = sh.fragmentShader.replace('#include <common>', `#include <common>
 uniform sampler2D dTex;
 varying vec3 vWp; varying vec3 vWn; varying float vDst;
-const mat2 R1 = mat2(0.8, 0.6, -0.6, 0.8), R2 = mat2(-0.28, 0.96, -0.96, -0.28), R3 = mat2(0.42, -0.91, 0.91, 0.42);
-// proti opakování: každá vrstva 2× v jiném natočení a neceločíselném měřítku, míchané podle pomalé masky
-vec3 dtl(vec2 p, float bA, float bB) {
-  float dA = mix(texture2D(dTex, p / 19.3).r, texture2D(dTex, R1 * p / 23.7 + 0.5).g, bB);
-  float dB = mix(texture2D(dTex, R2 * p / 141.0 + 0.37).g, texture2D(dTex, R1 * p / 103.0 + 0.71).r, bA);
-  float dC = mix(texture2D(dTex, p / 4.3).b, texture2D(dTex, R3 * p / 5.1).b, bA);
-  return vec3(dA, dB, dC);
+` + U.NT_GLSL + `
+// každá vrstva se čte „bez opakování“ (náhodně posunuté a otočené varianty dlaždice plynule míchané podle šumu)
+vec3 dtl(vec2 p) {
+  return vec3(texNT(dTex, p / 19.3).r, texNT(dTex, p / 137.0 + 0.37).g, texNT(dTex, p / 4.3).b);
 }`)
         .replace('#include <color_fragment>', `#include <color_fragment>
           vec2 p = vWp.xz;
-          float mk = texture2D(dTex, p / 2310.0 + 0.13).r, mk2 = texture2D(dTex, R3 * p / 1730.0 + 0.61).g;
-          float bA = smoothstep(0.38, 0.62, mk), bB = smoothstep(0.38, 0.62, mk2);
           // triplanární projekce: strmé stěny se texturují z boku, ne natažené shora
           vec3 n = normalize(vWn), w = pow(abs(n), vec3(4.0)); w /= (w.x + w.y + w.z);
-          vec3 d = dtl(p, bA, bB) * w.y;
-          if (w.x > 0.02) d += dtl(vWp.zy * vec2(1.0, 1.7), bA, bB) * w.x;
-          if (w.z > 0.02) d += dtl(vWp.xy * vec2(1.0, 1.7), bA, bB) * w.z;
-          float dA = clamp(0.5 + (d.x - 0.5) * 1.35, 0.0, 1.0), dB = clamp(0.5 + (d.y - 0.5) * 1.35, 0.0, 1.0), dC = d.z;
-          // jemné vrstvy do dálky slábnou, velké skvrny zůstávají
-          float fN = 1.0 - smoothstep(250.0, 1400.0, vDst), fC = 1.0 - smoothstep(30.0, 160.0, vDst);
-          float macro = 0.9 + 0.2 * mix(mk, mk2, 0.5);
-          diffuseColor.rgb *= macro * (${k[0].toFixed(2)} + ${k[1].toFixed(2)} * mix(0.5, dA, fN) + ${k[2].toFixed(2)} * dB + ${k[3].toFixed(2)} * (dC - 0.5) * fC);`);
+          vec3 d = dtl(p) * w.y;
+          if (w.x > 0.02) d += dtl(vWp.zy * vec2(1.0, 1.7) + 31.0) * w.x;
+          if (w.z > 0.02) d += dtl(vWp.xy * vec2(1.0, 1.7) + 57.0) * w.z;
+          float dA = clamp(0.5 + (d.x - 0.5) * 1.25, 0.0, 1.0), dB = clamp(0.5 + (d.y - 0.5) * 1.25, 0.0, 1.0), dC = d.z;
+          // jemné vrstvy do dálky slábnou (zdálky by z nich zbyl jen vzor), velké skvrny zůstávají
+          float fN = 1.0 - smoothstep(150.0, 900.0, vDst), fC = 1.0 - smoothstep(25.0, 120.0, vDst);
+          float macro = 0.88 + 0.24 * (ntN(p / 900.0) * 0.6 + ntN(p / 310.0 + 4.1) * 0.4);
+          diffuseColor.rgb *= macro * (${k[0].toFixed(2)} + ${k[1].toFixed(2)} * mix(0.5, dA, fN) + ${k[2].toFixed(2)} * dB + ${k[3].toFixed(2)} * (dC - 0.5) * 2.0 * fC);`);
     };
     return m;
   },

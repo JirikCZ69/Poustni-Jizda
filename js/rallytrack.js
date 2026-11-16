@@ -445,7 +445,7 @@ const RallyTrack = {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
     g.computeVertexNormals();
-    const terr = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('ground') })); terr.receiveShadow = true; sc.add(terr);
+    const terr = new THREE.Mesh(g, U.noTile(new THREE.MeshLambertMaterial({ vertexColors: true, map: Tex.get('ground') }))); terr.receiveShadow = true; sc.add(terr);
     const far = new THREE.Mesh(new THREE.PlaneGeometry(9000, 9000), new THREE.MeshLambertMaterial({ color: base.clone().multiplyScalar(0.95) }));
     far.rotation.x = -Math.PI / 2; far.position.set(P[P.length >> 1].x, minY - 0.5, P[P.length >> 1].z); sc.add(far);
     // silnice: pásy podle povrchu + krajnice

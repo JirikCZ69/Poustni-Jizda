@@ -181,6 +181,10 @@ Object.assign(Rally, {
       else if (a.res) {
         inp = { thr: 0, brk: 1, steer: 0, hb: false };
         a.goneT -= dt; if (a.goneT <= 0) { a.gone = true; a.vis.root.visible = false; continue; }
+      } else if (a.fix) {
+        // stojí u krajnice a mění kolo
+        inp = { thr: 0, brk: 1, steer: 0, hb: true };
+        if (c.speed < 2) { a.fix.t -= dt; if (a.fix.t <= 0) this.aiFixDone(a); }
       } else inp = this.aiDrive(a, dt);
       if (!go) { c.vx = c.vz = 0; c.wF = c.wR = 0; }
       const land = c.step(dt, inp, tr);
@@ -190,7 +194,7 @@ Object.assign(Rally, {
       if (nr && nr.s > a.sProg && nr.s - a.sProg < 30) a.sProg = nr.s;
       if (go && !a.res) {
         if (a.sProg >= tr.len - 12) { a.res = { dnf: false, time: this.clock }; a.goneT = 2.5; if (!this.my.res) this.msg(`${a.crew} je v cíli`, 1.4); continue; }
-        if (this.clock > a.react + 2.5) {
+        if (this.clock > a.react + 2.5 && !a.fix) {
           if (c.speed < 1.2) a.stuckT += dt; else a.stuckT = Math.max(0, a.stuckT - dt * 2);
           if (!nr || nr.d > nr.w / 2 + 5) a.offT += dt; else a.offT = 0;
           if (a.stuckT > 3 || a.offT > 2.5 || c.y < -50) this.aiReset(a);
@@ -213,19 +217,28 @@ Object.assign(Rally, {
       const wi = (lz >= 0 ? 0 : 2) + (lx >= 0 ? 0 : 1);
       if (!d.off[wi]) { d.wheel[wi] += amt * (zone === 'front' || zone === 'rear' ? 1.8 : 2.2); if (d.wheel[wi] >= 100) this.aiWheelOff(a, wi); }
     }
-    if (d.engine >= 100) this.aiRetire(a, 'motor na odpis');
+    if (d.engine >= 92) d.engine = 92;   // AI s rozbitým motorem dojede pomalu (dřív odstoupila → do cíle dojel jen hráč)
   },
   aiLand(a, v) {
     const c = a.car, amt = (v - 5.5) * 4.5 * (c.s.land || 1), d = c.dmg;
     d.engine = Math.min(100, d.engine + amt * 0.35);
     for (let i = 0; i < 4; i++) if (!d.off[i]) { d.wheel[i] += amt * 0.5; if (d.wheel[i] >= 100) this.aiWheelOff(a, i); }
-    if (d.engine >= 100) this.aiRetire(a, 'motor na odpis');
+    if (d.engine >= 92) d.engine = 92;
   },
   aiWheelOff(a, i) {
     const d = a.car.dmg; if (d.off[i]) return;
     d.off[i] = true; d.wheel[i] = 100;
-    const w = a.vis.wheels.find(w => (w.z > 0 ? 0 : 2) + (w.x > 0 ? 0 : 1) === i); if (w) w.pivot.visible = false;
-    this.aiRetire(a, 'utržené kolo');
+    const w = this.aiWheelVis(a, i); if (w) w.pivot.visible = false;
+    // posádka zastaví, kolo doběhne a nasadí ho zpátky (jako hráč) – nevzdává hned
+    if (!a.fix) { a.fix = { t: 10 + Math.random() * 6, wheels: [] }; if (!this.my.res) this.msg(`${a.crew} ztratil kolo – nasazuje ho zpátky`, 2); }
+    a.fix.wheels.push(i);
+  },
+  aiWheelVis(a, i) { return a.vis.wheels.find(w => (w.z > 0 ? 0 : 2) + (w.x > 0 ? 0 : 1) === i); },
+  aiFixDone(a) {
+    const d = a.car.dmg;
+    for (const i of a.fix.wheels) { d.off[i] = false; d.wheel[i] = 45; const w = this.aiWheelVis(a, i); if (w) w.pivot.visible = true; }
+    a.fix = null; a.stuckT = a.offT = 0;
+    if (!this.my.res) this.msg(`${a.crew} má kolo zpátky a jede dál`, 1.6);
   },
   aiRetire(a, why) {
     if (a.res) return;

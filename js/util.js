@@ -167,3 +167,41 @@ U.store = {
   get(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* nic */ } },
 };
+
+// ---------- textury bez viditelného opakování ----------
+// Technika podle I. Quíleze („texture no tile“): textura se čte dvakrát s náhodným posunutím, které se plynule mění
+// podle nízkofrekvenčního šumu; přechody jsou tam, kde má druhý vzorek nulovou váhu, takže nevznikají švy.
+// Navíc velké světlé/tmavé skvrny, aby plocha z dálky nebyla jednolitá.
+U.NT_GLSL = `
+float ntH(vec2 p) { p = mod(p, 289.0); return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }   // mod: přesnost sin() i daleko od počátku
+float ntN(vec2 p) { vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(ntH(i), ntH(i + vec2(1.0, 0.0)), f.x), mix(ntH(i + vec2(0.0, 1.0)), ntH(i + vec2(1.0, 1.0)), f.x), f.y); }
+vec4 texNT(sampler2D s, vec2 uv) {
+  float l = (ntN(uv * 0.37) * 0.6 + ntN(uv * 0.11 + 5.3) * 0.4) * 9.0;
+  float f = fract(l), ia = floor(l + 0.5), ib = floor(l);
+  f = min(f, 1.0 - f) * 2.0;
+  vec2 offa = sin(vec2(3.0, 7.0) * ia), offb = sin(vec2(3.0, 7.0) * ib);
+  // každá varianta je navíc otočená/zrcadlená, aby se nepoznal ani směr zrna
+  vec2 ua = (mod(ia, 2.0) > 0.5 ? uv.yx : uv) + offa, ub = (mod(ib, 2.0) > 0.5 ? vec2(-uv.x, uv.y) : uv) + offb;
+  vec4 a = texture2D(s, ua), b = texture2D(s, ub);
+  vec4 d = a - b;
+  return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * (d.r + d.g + d.b)));
+}
+float ntMacro(vec2 uv) { return 0.86 + 0.28 * (ntN(uv * 0.045 + 1.7) * 0.65 + ntN(uv * 0.13 + 9.1) * 0.35); }
+`;
+// přepne mapu materiálu na čtení bez opakování (zachová případný vlastní onBeforeCompile)
+U.noTile = (mat, macro = true) => {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (sh, r) => {
+    if (prev && prev !== THREE.Material.prototype.onBeforeCompile) prev(sh, r);
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\n' + U.NT_GLSL)
+      .replace('#include <map_fragment>', `#ifdef USE_MAP
+  vec4 texelColor = texNT(map, vUv);
+  texelColor = mapTexelToLinear(texelColor);
+  diffuseColor *= texelColor;${macro ? '\n  diffuseColor.rgb *= ntMacro(vUv);' : ''}
+#endif`);
+  };
+  mat.customProgramCacheKey = () => 'noTile' + (macro ? 1 : 0) + (prev ? prev.toString().length : 0);
+  mat.needsUpdate = true;
+  return mat;
+};
