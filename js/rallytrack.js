@@ -17,16 +17,21 @@ const RALLY_BIOMES = {
     mix: { sand: 0.75, gravel: 0.25 }, names: ['Duny', 'Písečné moře', 'Vátý písek', 'Zlaté duny'], desc: 'Měkký písek a skoky přes duny. Bez pískových gum se hrabeš.', jumpK: 2 },
   alpine: { name: 'Hory', ground: 0x76875a, sky: 0xd4e2ee, hemi: 0x4a5a48, rock: 0x8a8a88, props: [['pine', 0.78], ['rock', 0.22]], dens: 2.4, close: 0.5, mount: 0x707a86, mountN: 1.3, snow: true, rails: 1.2,
     mix: { asphalt: 0.55, gravel: 0.45 }, names: ['Horský průsmyk', 'Serpentiny', 'Pod štíty', 'Ledový hřeben'], desc: 'Serpentiny v horách, lesy a svodidla nad propastí.', hillK: 1.5, curvK: 1.25 },
+  village: { name: 'Vesnice', ground: 0x7d8c48, sky: 0xd2e0ea, hemi: 0x52633a, rock: 0x8a8272, props: [['oak', 0.55], ['bush', 0.3], ['pine', 0.15]], dens: 1.1, close: 0.25, mount: 0x6a7a5a, mountN: 0.5, rails: 0.25,
+    mix: { asphalt: 0.6, gravel: 0.4 }, settle: 'village', hillK: 0.8, names: ['Návesní okruh', 'Kolem kapličky', 'Za humny', 'Přes tři vesnice'], desc: 'Úzké silnice mezi chalupami, ploty a kostelem. Plot ani zeď neodpustí.' },
+  town: { name: 'Město', ground: 0x86866a, sky: 0xd8dde2, hemi: 0x5a5a4a, rock: 0x8a8580, props: [['oak', 0.7], ['bush', 0.3]], dens: 0.7, close: 0.15, mount: 0x7a8070, mountN: 0.35, rails: 0.2,
+    mix: { asphalt: 0.92, gravel: 0.08 }, settle: 'town', hillK: 0.55, curvK: 1.1, names: ['Městský okruh', 'Hlavní třída', 'Staré město', 'Kolem náměstí'], desc: 'Asfalt mezi domy, lampy, obrubníky a přechody. Zeď je tvrdší než strom.' },
 };
-const RALLY_BIOME_ORDER = ['desert', 'forest', 'canyon', 'dunes', 'alpine'];
+const RALLY_BIOME_ORDER = ['desert', 'village', 'forest', 'canyon', 'town', 'dunes', 'alpine'];
+const RALLY_OLD_ORDER = ['desert', 'forest', 'canyon', 'dunes', 'alpine'];   // dřívější pořadí – etapy, které zůstaly stejné, si nechají id (a časy v žebříčku)
 // etapa n (0 = první): s každou další ostřejší zatáčky, větší kopce, víc skoků a delší trať
 function rallyStage(n) {
   n = Math.max(0, Math.floor(n) || 0);
-  const bk = RALLY_BIOME_ORDER[n % 5], B = RALLY_BIOMES[bk], lap = Math.floor(n / 5);
+  const NB = RALLY_BIOME_ORDER.length, bk = RALLY_BIOME_ORDER[n % NB], B = RALLY_BIOMES[bk], lap = Math.floor(n / NB);
   const mix = Object.assign({}, B.mix);
   if (n >= 5 && bk !== 'dunes') { const other = bk === 'desert' ? 'sand' : 'gravel'; mix[other] = (mix[other] || 0) + 0.15; }
   const st = {
-    id: 'r' + (n + 1), n, biome: bk, name: `${n + 1}. ${B.names[lap % B.names.length]}`, lvl: 1,
+    id: 'r' + (n + 1) + (bk === RALLY_OLD_ORDER[n % 5] ? '' : bk.slice(0, 2)), n, biome: bk, name: `${n + 1}. ${B.names[lap % B.names.length]}`, lvl: 1,
     len: Math.min(7500, 2300 + n * 320), mix,
     curvy: Math.min(3.4, 0.85 + n * 0.17) * (B.curvK || 1), hills: Math.min(5, 0.8 + n * 0.3) * (B.hillK || 1),
     grade: Math.min(0.74, 0.42 + n * 0.022), straight: Math.max(0.05, 0.22 - n * 0.012), minR: Math.max(12, 17 - n * 0.35),
@@ -164,6 +169,9 @@ const RallyTrack = {
     const side = (p, off) => ({ x: p.x + Math.cos(p.t) * off, z: p.z + Math.sin(p.t) * off });
     const clearOf = (x, z, m) => { const nr = this.nearest(tr, x, z); return !nr || nr.d > m; };
     const B = RALLY_BIOMES[st.biome] || RALLY_BIOMES.desert;
+    // vesnice / město: úseky se zástavbou (v nich nejsou svodidla, tyčky ani křoví u krajnice)
+    tr.zones = B.settle ? this.zones(tr, rnd, B.settle) : [];
+    const inZone = (s, m) => tr.zones.some(z => s > z.a - (m || 0) && s < z.b + (m || 0));
     // svodidla: tam, kde terén vedle silnice prudce padá (sráz), a na vnější straně rychlých zatáček
     tr.rails = [];
     const railOn = [new Uint8Array(P.length), new Uint8Array(P.length)];
@@ -171,7 +179,7 @@ const RallyTrack = {
       for (let i = 8; i < P.length - 8; i++) {
         const p = P[i], q = side(p, sd * (p.w / 2 + 6)), drop = p.y - this.terrain(tr, q.x, q.z);
         const outer = Math.sign(p.k) === -sd && Math.abs(p.k) > 1 / 150 && Math.abs(p.k) < 1 / 30 && B.rails >= 0.7;
-        if (drop > 3.2 / B.rails || outer) for (let j = i - 4; j <= i + 4; j++) railOn[si][j] = 1;
+        if ((drop > 3.2 / B.rails || outer) && !inZone(p.s, 20)) for (let j = i - 4; j <= i + 4; j++) railOn[si][j] = 1;
       }
       let run = null;
       for (let i = 0; i <= P.length; i++) {
@@ -184,7 +192,7 @@ const RallyTrack = {
       add({ kind: 'rail', x: qa.x + (qb.x - qa.x) * u, z: qa.z + (qb.z - qa.z) * u, r: 0.42 });
     }
     // tyčky na krajích (každých 32 m, střídavě; ne tam, kde jsou svodidla)
-    for (let s = 20, i = 0; s < tr.len - 20; s += 32, i++) { const pi = Math.round(s / RT_STEP), p = P[pi], sd = i % 2 ? 1 : -1; if (railOn[sd < 0 ? 0 : 1][pi]) continue; const q = side(p, sd * (p.w / 2 + 1.3)); add({ kind: 'pole', x: q.x, z: q.z, r: 0.12 }); }
+    for (let s = 20, i = 0; s < tr.len - 20; s += 32, i++) { const pi = Math.round(s / RT_STEP), p = P[pi], sd = i % 2 ? 1 : -1; if (railOn[sd < 0 ? 0 : 1][pi] || inZone(s, 15)) continue; const q = side(p, sd * (p.w / 2 + 1.3)); add({ kind: 'pole', x: q.x, z: q.z, r: 0.12 }); }
     // rostliny a kameny podle prostředí – část schválně těsně u krajnice
     const dens = st.trees, props = B.props;
     const R0 = { tree: 0.32, joshua: 0.28, cactus: 0.3, rock: 0.9, pine: 0.3, oak: 0.36, bush: 0.5 };
@@ -196,8 +204,8 @@ const RallyTrack = {
       const p = P[Math.round(s / RT_STEP)];
       for (const sd of [-1, 1]) {
         if (rnd() > 0.22 * dens) continue;
-        const close = rnd() < B.close, off = sd * (p.w / 2 + (close ? 2.0 + rnd() * 3.5 : 6 + rnd() * 40)), q = side(p, off);
-        if (!clearOf(q.x, q.z, p.w / 2 + 1.6)) continue;
+        const zn = inZone(s, 10), close = !zn && rnd() < B.close, off = sd * (p.w / 2 + (close ? 2.0 + rnd() * 3.5 : (zn ? 30 : 6) + rnd() * 40)), q = side(p, off);
+        if (!clearOf(q.x, q.z, p.w / 2 + (zn ? 26 : 1.6))) continue;
         put(q, 0.7 + rnd() * 0.7);
       }
     }
@@ -218,7 +226,223 @@ const RallyTrack = {
       const s = tr.len * (0.12 + j * 0.18) + rnd() * 60, p = P[Math.round(s / RT_STEP)], sd = p.k > 0 ? -1 : 1, q = side(p, sd * (p.w / 2 + 7));
       if (clearOf(q.x, q.z, p.w / 2 + 4)) tr.crowds.push({ x: q.x, z: q.z, t: p.t, sd });
     }
+    if (tr.zones.length) this.settle(tr, rnd, add, side, clearOf, B.settle);
   },
+  // ---------- vesnice a město ----------
+  // úseky trati se zástavbou: vesnice = 2–3 obce za sebou, město = dlouhé ulice přerušené parky
+  zones(tr, rnd, kind) {
+    const out = [], L = tr.len, town = kind === 'town';
+    let s = town ? 90 + rnd() * 60 : 160 + rnd() * 140;
+    while (s < L - 260 && out.length < (town ? 9 : 3)) {
+      const a = s, b = Math.min(L - 130, a + (town ? 520 + rnd() * 480 : 280 + rnd() * 200));
+      if (b - a > 150) out.push({ a, b });
+      s = b + (town ? 130 + rnd() * 170 : 420 + rnd() * 600);
+    }
+    return out;
+  },
+  // domy podél silnice (fasáda k silnici), ploty, lampy, chodníky, přechody, cedule obcí, kostel
+  settle(tr, rnd, add, side, clearOf, kind) {
+    const P = tr.pts, town = kind === 'town', at = (s) => P[U.clamp(Math.round(s / RT_STEP), 0, P.length - 1)];
+    const H = tr.houses = [], D0 = tr.deco = { lamps: [], fences: [], signs: [], walks: [], zebras: [] };
+    const VN = ['Lhotka', 'Dolní Ves', 'Hrabětice', 'Kamenice', 'Bukovina', 'Oldřichov', 'Zahrádky', 'Mlýnec', 'Podhradí', 'Vrbice', 'Habrovany', 'Lipník'];
+    const TN = ['Nové Město', 'Horní Brod', 'Kamenný Újezd', 'Rybníky', 'Hradiště', 'Staré Sedlo'];
+    const L2W = (h, lx, lz) => { const ca = Math.cos(h.t), sa = Math.sin(h.t); return { x: h.x + ca * lx - sa * lz, z: h.z + sa * lx + ca * lz }; };
+    const free = (h, m) => { for (const [a, b] of [[0, 0], [1, 1], [1, -1], [-1, 1], [-1, -1], [1, 0], [-1, 0], [0, 1], [0, -1]]) { const q = L2W(h, a * h.D / 2, b * h.W / 2); if (!clearOf(q.x, q.z, m)) return false; } return true; };
+    const crowd = (x, z) => tr.crowds.some(c => (c.x - x) ** 2 + (c.z - z) ** 2 < 15 * 15);
+    const overlap = (h) => H.some(o => (o.x - h.x) ** 2 + (o.z - h.z) ** 2 < (0.47 * (Math.max(o.W, o.D) + Math.max(h.W, h.D))) ** 2);
+    const walls = (h) => {   // zdi = řada kruhových kolizí po obvodu domu
+      const fx = -h.sd * (h.D / 2 - 1);
+      for (let lz = -h.W / 2 + 1; lz <= h.W / 2 - 0.99; lz += 1.7) { const q = L2W(h, fx, lz); add({ kind: 'wall', x: q.x, z: q.z, r: 1.05 }); }
+      for (const lz of [-h.W / 2 + 1, h.W / 2 - 1]) for (let k = 1.7; k < h.D - 2; k += 1.7) { const q = L2W(h, fx + h.sd * k, lz); add({ kind: 'wall', x: q.x, z: q.z, r: 1.05 }); }
+    };
+    const place = (s, sd, W, D, set, extra) => {
+      const p = at(s + W / 2), c = side(p, sd * (p.w / 2 + set + D / 2));
+      const h = Object.assign({ x: c.x, z: c.z, t: p.t, W, D, sd, set, town, seed: rnd() }, extra);
+      if (!free(h, p.w / 2 + set - 0.4) || crowd(h.x, h.z) || overlap(h)) return null;
+      H.push(h); walls(h); return h;
+    };
+    if (town) tr.townName = TN[Math.floor(rnd() * TN.length)];
+    tr.zones.forEach((zn, zi) => {
+      zn.name = town ? tr.townName : VN[(Math.floor(rnd() * VN.length) + zi * 5) % VN.length];
+      // kostel uprostřed první vesnice
+      if (!town && zi === 0) { const s = (zn.a + zn.b) / 2 - 8; place(s, rnd() < 0.5 ? -1 : 1, 15, 9, 8 + rnd() * 3, { church: true }); }
+      for (const sd of [-1, 1]) {
+        let s = zn.a + rnd() * 8, n = 0;
+        while (s < zn.b) {
+          const W = town ? 9 + rnd() * 6 : 7.5 + rnd() * 3, D = town ? 10 + rnd() * 4 : 6.5 + rnd() * 2.5, set = town ? 3.1 : 5.5 + rnd() * 5;
+          const h = place(s, sd, W, D, set, { floors: town ? 2 + Math.floor(rnd() * 3) : 1, flat: town && rnd() < 0.55 });
+          if (h && !town && set > 6.3) {   // plaňkový plot před předzahrádkou
+            const fl = -sd * (D / 2 + set - 2.8);
+            D0.fences.push({ h, lx: fl, len: W + 3, col: rnd() < 0.5 ? 0xe8e2d4 : 0x8a6a46 });
+            for (let lz = -(W + 3) / 2; lz <= (W + 3) / 2; lz += 1.8) { const q = L2W(h, fl, lz); add({ kind: 'fence', x: q.x, z: q.z, r: 0.28 }); }
+          }
+          s += W + (town ? (++n % 6 === 0 ? 11 + rnd() * 6 : 0.05) : 7 + rnd() * 10);
+        }
+      }
+      // lampy: město po obou stranách na chodníku, vesnice dřevěné sloupy na jedné straně
+      for (let s = zn.a + 10, i = 0; s < zn.b - 5; s += town ? 26 : 42, i++) {
+        const p = at(s), sd = town ? (i % 2 ? 1 : -1) : 1, q = side(p, sd * (p.w / 2 + (town ? 2.3 : 1.9)));
+        if (H.some(o => (o.x - q.x) ** 2 + (o.z - q.z) ** 2 < (Math.min(o.W, o.D) / 2 + 0.6) ** 2)) continue;
+        D0.lamps.push({ x: q.x, z: q.z, t: p.t, sd, town }); add({ kind: 'lamp', x: q.x, z: q.z, r: 0.2 });
+      }
+      if (town) {
+        D0.walks.push({ a: zn.a, b: zn.b });
+        for (let s = zn.a + 60 + rnd() * 40; s < zn.b - 40; s += 150 + rnd() * 90) D0.zebras.push(s);
+      }
+      // cedule obce na začátku a konci (vpravo po směru jízdy)
+      const cedule = (s, end) => { const p = at(s), q = side(p, p.w / 2 + 2.4); D0.signs.push({ x: q.x, z: q.z, t: p.t, name: zn.name, end }); add({ kind: 'lamp', x: q.x, z: q.z, r: 0.14 }); };
+      if (!town || zi === 0) cedule(zn.a - 12, false);
+      if (!town || zi === tr.zones.length - 1) cedule(zn.b + 8, true);
+    });
+  },
+  // trojboký hranol (štít + střecha): průřez trojúhelník v x–y, protažený podél z
+  prism() {
+    if (this._prism) return this._prism;
+    const A = [-0.5, 0], B = [0.5, 0], C = [0, 1], v = [];
+    const p = (q, z) => v.push(q[0], q[1], z);
+    const tri = (a, b, c) => { p(a[0], a[1]); p(b[0], b[1]); p(c[0], c[1]); };
+    tri([A, 0.5], [B, 0.5], [C, 0.5]); tri([A, -0.5], [C, -0.5], [B, -0.5]);
+    tri([A, 0.5], [C, 0.5], [A, -0.5]); tri([C, 0.5], [C, -0.5], [A, -0.5]);
+    tri([B, 0.5], [B, -0.5], [C, 0.5]); tri([C, 0.5], [B, -0.5], [C, -0.5]);
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+    return (this._prism = g);
+  },
+  signTex(name, end) {
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 176;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#f6f6f2'; g.fillRect(0, 0, 512, 176); g.strokeStyle = '#111'; g.lineWidth = 12; g.strokeRect(14, 14, 484, 148);
+    g.fillStyle = '#111'; g.font = 'bold 64px Arial'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(name, 256, 90, 440);
+    if (end) { g.strokeStyle = '#d0201a'; g.lineWidth = 16; g.beginPath(); g.moveTo(40, 150); g.lineTo(472, 26); g.stroke(); }
+    const t = new THREE.CanvasTexture(cv); t.anisotropy = 4; return t;
+  },
+  buildSettle(sc, tr) {
+    const M = new U.Merger(), Lg = new U.Merger(), hg = (x, z) => this.height(tr, x, z), P = tr.pts, Yax = new THREE.Vector3(0, 1, 0);
+    const PR = this.prism(), V = new THREE.Vector3(), Q = new THREE.Quaternion(), S = new THREE.Vector3(), E = new THREE.Euler();
+    const VW = [0xf0ead8, 0xe8dcb8, 0xe6cfa0, 0xdcd4c2, 0xeee2c8, 0xd8c8a8], VR = [0xa0422a, 0x8a3a26, 0x7a4a36, 0x5a5a5e, 0x9a4a2e];
+    const TW = [0xe8d8b0, 0xd9a07a, 0xc8d0b8, 0xe2c2a0, 0xb8c8d8, 0xf0e6d0, 0xd0a8a0, 0xc4b8d6, 0xe6d27a], TR = [0x6a4a3a, 0x8a3a26, 0x50545a, 0x7a3e2a];
+    const AW = [0xb83a2a, 0x2a6a4a, 0x2a4a8a, 0xd8a030, 0x6a2a6a];
+    const pick = (a, r) => a[Math.floor(r * a.length) % a.length];
+    for (const h of tr.houses) {
+      const ca = Math.cos(h.t), sa = Math.sin(h.t), hw = h.D / 2, hz = h.W / 2;
+      let lo = 1e9, hi = -1e9;
+      for (const [a, b] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) { const y = hg(h.x + ca * a * hw - sa * b * hz, h.z + sa * a * hw + ca * b * hz); lo = Math.min(lo, y); hi = Math.max(hi, y); }
+      const y0 = hi + 0.25, bot = lo - 0.7 - y0, r = (k) => U.hash(Math.round(h.x * 7) + k, Math.round(h.z * 7), 13);
+      // krabice v souřadnicích domu: x = napříč (fasáda k silnici na −sd), z = podél silnice
+      const box = (m, lx, ly, lz, sx, sy, sz, col, rz, ry) => m.addBox(sx, sy, sz, h.x + ca * lx - sa * lz, y0 + ly, h.z + sa * lx + ca * lz, -h.t + (ry || 0), col, 0, rz || 0);
+      const geo = (g, lx, ly, lz, sx, sy, sz, col, ry) => { V.set(h.x + ca * lx - sa * lz, y0 + ly, h.z + sa * lx + ca * lz); Q.setFromAxisAngle(Yax, -h.t + (ry || 0)); S.set(sx, sy, sz); M.add(g, new THREE.Matrix4().compose(V, Q, S), col); };
+      const front = -h.sd * hw, fo = (d) => -h.sd * (hw + d);
+      if (h.church) {
+        const Hw = 7, wall = 0xf2eee4, roof = 0x4a4e52;
+        box(M, 0, (Hw + bot) / 2, 0, h.D, Hw - bot, h.W, wall);
+        const rh = h.D * 0.55, a = Math.atan2(rh, hw), sl = Math.hypot(hw, rh) + 0.5;
+        geo(PR, 0, Hw, 0, h.D, rh, h.W, wall);
+        for (const sg of [-1, 1]) box(M, sg * hw / 2, Hw + rh / 2 + 0.08, 0, sl, 0.18, h.W + 0.6, roof, -sg * a);
+        const tz = -hz + 1.8;   // věž na konci lodi
+        box(M, 0, (16 + bot) / 2, tz, 3.8, 16 - bot, 3.8, wall);
+        box(M, 0, 16.2, tz, 4.2, 0.4, 4.2, 0xd8d2c4);
+        const cone = this._spire || (this._spire = new THREE.ConeGeometry(0.5 / Math.SQRT1_2, 1, 4));
+        geo(cone, 0, 16.4 + 3.6, tz, 5.6, 7.2, 5.6, 0x5f8f7a, Math.PI / 4);
+        box(M, -h.sd * 1.95, 13, tz, 0.1, 1.5, 1.5, 0xf6f4ee);   // ciferník věžních hodin
+        box(M, -h.sd * 2.02, 13.2, tz, 0.06, 0.6, 0.1, 0x2a2a2a);
+        for (let k = -2; k <= 2; k++) if (k) box(M, fo(0.04), 3.4, k * 2.6, 0.1, 3, 1.1, 0x3a4652);   // vysoká okna
+        box(M, fo(0.05), 1.3, tz, 0.12, 2.6, 1.6, 0x5a3a26);   // vrata
+        continue;
+      }
+      const floors = h.floors || 1, Hw = floors * 3 + (h.town ? 0.5 : 0.3);
+      const wall = h.town ? pick(TW, r(1)) : pick(VW, r(1)), roof = h.town ? pick(TR, r(2)) : pick(VR, r(2));
+      box(M, 0, (Hw + bot) / 2, 0, h.D, Hw - bot, h.W, wall);
+      box(M, 0, (bot + 0.55) / 2, 0, h.D + 0.12, 0.55 - bot, h.W + 0.12, 0x6e675e);   // sokl
+      if (h.flat) {
+        box(M, 0, Hw + 0.2, 0, h.D + 0.3, 0.4, h.W + 0.12, 0xece6da);   // římsa
+        box(M, 0, Hw + 0.42, 0, h.D - 0.3, 0.06, h.W - 0.3, 0x55575a);
+        if (r(3) < 0.6) box(M, h.sd * hw * 0.3, Hw + 0.8, (r(4) - 0.5) * h.W * 0.5, 1.2, 0.8, 1.6, 0x9a9a96);
+      } else {
+        const rh = h.D * (h.town ? 0.34 : 0.44), a = Math.atan2(rh, hw), sl = Math.hypot(hw, rh) + 0.55;
+        geo(PR, 0, Hw, 0, h.D, rh, h.W, wall);
+        for (const sg of [-1, 1]) box(M, sg * hw / 2, Hw + rh / 2 + 0.08, 0, sl, 0.16, h.W + 0.5, roof, -sg * a);
+        box(M, h.sd * hw * 0.35, Hw + rh * 0.75, (r(5) - 0.5) * h.W * 0.5, 0.55, 1.5, 0.55, 0x8a5a44);   // komín
+        if (h.town) box(M, 0, Hw + 0.12, 0, h.D + 0.24, 0.24, h.W + 0.24, 0xece6da);
+      }
+      // okna a dveře na fasádě k silnici
+      const n = Math.max(2, Math.floor(h.W / 2.6)), door = h.town ? null : (r(6) < 0.5 ? -1 : 1) * (hz - 1.5);
+      for (let f = 0; f < floors; f++) {
+        const shop = h.town && f === 0 && r(7) < 0.65;
+        if (shop) {
+          box(M, fo(0.03), 1.45, 0, 0.1, 2.3, h.W * 0.72, 0xf2efe6);
+          box(M, fo(0.07), 1.45, 0, 0.1, 2.0, h.W * 0.68, 0x34465a);
+          box(M, fo(0.65), 2.95, 0, 1.3, 0.1, h.W * 0.76, pick(AW, r(8)), h.sd * 0.28);   // markýza
+          continue;
+        }
+        for (let k = 0; k < n; k++) {
+          const lz = -hz + (k + 0.5) * h.W / n;
+          if (door !== null && f === 0 && Math.abs(lz - door) < 1.2) continue;
+          if (h.town && f === 0 && Math.abs(lz) < 0.8 && n % 2) continue;
+          const wy = 1.55 + f * 3, ww = h.town ? 1.05 : 0.95, wh = h.town ? 1.45 : 1.05;
+          box(M, fo(0.03), wy, lz, 0.08, wh + 0.2, ww + 0.2, 0xf4f1ea);
+          box(M, fo(0.06), wy, lz, 0.08, wh, ww, 0x34465a);
+          if (!h.town) box(M, fo(0.16), wy - wh / 2 - 0.12, lz, 0.25, 0.1, ww + 0.3, 0xf4f1ea);   // parapet
+        }
+      }
+      if (door !== null) box(M, fo(0.05), 1.05, door, 0.1, 2.1, 1.0, 0x6a4428);
+      else box(M, fo(0.05), 1.15, 0, 0.1, 2.3, 1.2, 0x4a3a2a);
+    }
+    // ploty (plaňky + dvě latě)
+    for (const f of tr.deco.fences) {
+      const h = f.h, ca = Math.cos(h.t), sa = Math.sin(h.t);
+      for (let lz = -f.len / 2; lz <= f.len / 2 + 0.01; lz += 0.55) {
+        const x = h.x + ca * f.lx - sa * lz, z = h.z + sa * f.lx + ca * lz, y = hg(x, z);
+        M.addBox(0.07, 1.05, 0.09, x, y + 0.5, z, -h.t, f.col);
+      }
+      for (const yy of [0.35, 0.8]) for (let lz = -f.len / 2; lz < f.len / 2; lz += 1.8) {
+        const l2 = Math.min(f.len / 2, lz + 1.8), m = (lz + l2) / 2, x = h.x + ca * (f.lx + h.sd * 0.07) - sa * m, z = h.z + sa * (f.lx + h.sd * 0.07) + ca * m;
+        M.addBox(0.05, 0.09, l2 - lz + 0.05, x, hg(x, z) + yy, z, -h.t, f.col);
+      }
+    }
+    // lampy
+    for (const l of tr.deco.lamps) {
+      const y = hg(l.x, l.z), ca = Math.cos(l.t), sa = Math.sin(l.t), arm = -l.sd * 1.3, ax = l.x + ca * arm / 2, az = l.z + sa * arm / 2, hx = l.x + ca * arm, hz2 = l.z + sa * arm;
+      if (l.town) {
+        M.addBox(0.16, 6.2, 0.16, l.x, y + 3.1, l.z, -l.t, 0x3a3e42);
+        M.addBox(1.3, 0.1, 0.1, ax, y + 6.1, az, -l.t, 0x3a3e42);
+        Lg.addBox(0.55, 0.16, 0.32, hx, y + 6.0, hz2, -l.t, 0xfff0c8);
+      } else {
+        M.addBox(0.2, 7, 0.2, l.x, y + 3.5, l.z, -l.t, 0x6a4a30);
+        M.addBox(0.9, 0.08, 0.08, l.x + ca * arm * 0.35, y + 6.4, l.z + sa * arm * 0.35, -l.t, 0x4a4a4a);
+        Lg.addBox(0.35, 0.14, 0.25, l.x + ca * arm * 0.65, y + 6.3, l.z + sa * arm * 0.65, -l.t, 0xfff0c8);
+      }
+    }
+    // chodníky s obrubníkem (město)
+    for (const w of tr.deco.walks) {
+      const i0 = Math.max(0, Math.round(w.a / RT_STEP)), i1 = Math.min(P.length - 1, Math.round(w.b / RT_STEP));
+      for (let i = i0; i < i1; i++) {
+        const a = P[i], b = P[i + 1], t = (a.t + b.t) / 2, len = Math.hypot(b.x - a.x, b.z - a.z) + 0.35, y = (a.y + b.y) / 2, hw = a.w / 2, pit = Math.atan2(b.y - a.y, len - 0.35);   // chodník kopíruje sklon silnice (jinak dělá schody)
+        for (const sd of [-1, 1]) {
+          const o = sd * (hw + 1.6), x = (a.x + b.x) / 2 + Math.cos(t) * o, z = (a.z + b.z) / 2 + Math.sin(t) * o;
+          M.addBox(2.6, 1.1, len, x, y + 0.13 - 0.55, z, -t, 0xb4b0a6, pit);
+          const oc = sd * (hw + 0.38), cx = (a.x + b.x) / 2 + Math.cos(t) * oc, cz = (a.z + b.z) / 2 + Math.sin(t) * oc;
+          M.addBox(0.22, 1.1, len, cx, y + 0.15 - 0.55, cz, -t, 0xd6d2c8, pit);
+        }
+      }
+    }
+    // přechody pro chodce
+    for (const s of tr.deco.zebras) {
+      const p = P[Math.min(P.length - 1, Math.round(s / RT_STEP))], hw = p.w / 2;
+      for (let l = -hw + 0.6; l <= hw - 0.5; l += 1.0) {
+        const x = p.x + Math.cos(p.t) * l, z = p.z + Math.sin(p.t) * l, y = p.y - (l / hw) ** 2 * 0.08 + 0.065;
+        M.addBox(0.5, 0.03, 3.2, x, y, z, -p.t, 0xf0f0ea);
+      }
+    }
+    const mm = M.build(new THREE.MeshLambertMaterial({ vertexColors: true })); if (mm) sc.add(mm);
+    const lm = Lg.build(new THREE.MeshLambertMaterial({ vertexColors: true, emissive: 0x6a5a30 })); if (lm) { lm.castShadow = false; sc.add(lm); }
+    // cedule obcí (černý rámeček, konec obce přeškrtnutý)
+    for (const s of tr.deco.signs) {
+      const y = hg(s.x, s.z), g2 = new THREE.Group(); g2.position.set(s.x, y, s.z); g2.rotation.y = -s.t; sc.add(g2);
+      for (const px of [-0.85, 0.85]) { const m = new THREE.Mesh(new THREE.BoxGeometry(0.07, 2.3, 0.07), U.mat(0x8a8e92)); m.position.set(px, 1.15, -0.04); m.castShadow = true; g2.add(m); }
+      const pl = new THREE.Mesh(new THREE.BoxGeometry(2.3, 0.8, 0.04), new THREE.MeshLambertMaterial({ map: this.signTex(s.name, s.end) }));
+      pl.position.set(0, 1.95, 0); pl.castShadow = true; g2.add(pl);
+    }
+  },
+
   // kužely v zatáčkách na okraji trati – na vnější straně (smykem je zadkem smeteš) a občas u vrcholu na vnitřní
   placeCones(tr) {
     const P = tr.pts, rnd = U.rng(tr.seed + 404), add = (o) => { tr.objs.push(o); this.gpush(tr.ogrid, o.x, o.z, o); };
@@ -580,6 +804,7 @@ const RallyTrack = {
       }
     }
     tr.inst = groups;
+    if (tr.houses && tr.houses.length) this.buildSettle(sc, tr);
     // diváci
     const people = new U.Merger(), cols = [0xd8402a, 0x2a6ab0, 0xe8b81a, 0x3a8a4a, 0xf2f2f2, 0x8a3ab0, 0xe07020];
     for (const cr of tr.crowds) {

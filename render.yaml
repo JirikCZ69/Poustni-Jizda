@@ -9,3 +9,8 @@ services:
         value: JirikCZ/pouste-jizda-data
       - key: HF_TOKEN
         sync: false
+      # záložní TURN server pro multiplayer (Cloudflare Realtime → TURN Server: Token ID + API token)
+      - key: CF_TURN_KEY_ID
+        sync: false
+      - key: CF_TURN_TOKEN
+        sync: false

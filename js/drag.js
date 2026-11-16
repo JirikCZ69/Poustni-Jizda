@@ -66,6 +66,10 @@ const DRAG_CATS = [
     { n: 'Bez wheelie baru', on: 0, lvl: 1, price: 0 },
     { n: 'Wheelie bar', d: 'Nedovolí autu postavit se na zadní kola', on: 1, lvl: 3, price: 2500 },
   ] },
+  { id: 'lc', name: 'Launch control', items: [
+    { n: 'Bez launch controlu', on: 0, lvl: 1, price: 0 },
+    { n: 'Launch control', d: 'Drž plyn: motor sám drží ideální startovní otáčky a po startu hlídá prokluz. Ty jen trefíš zelenou.', on: 1, lvl: 1, price: 4500 },
+  ] },
   { id: 'chute', name: 'Padák', items: [
     { n: 'Bez padáku', on: 0, lvl: 1, price: 0 },
     { n: 'Brzdicí padák', d: 'Po cíli rychle zastavíš (a vypadá to cool)', on: 1, lvl: 4, price: 3000 },
@@ -134,7 +138,8 @@ class DragCar {
     this.rocketOn = this.rocketT >= 0 && this.rocketT < s.rocketDur;
     if (this.rocketOn) { this.rocketT += h; Fext += s.rocketN; }
     if (!this.launched) {   // stojí na startu, motor se dá vytočit
-      const tgt = 900 + thr * (s.red * 1.03 - 900);
+      const lcOn = s.lc && s.lcR && thr > 0.3;   // launch control: plyn na podlaze = ideální otáčky
+      const tgt = 900 + (lcOn ? s.lcR : thr) * (s.red * 1.03 - 900);
       this.rpm += (tgt - this.rpm) * Math.min(1, h * (thr > 0 ? 6 : 3));
       this.limiter = this.rpm >= s.red; if (this.limiter) this.rpm = s.red - Math.random() * 180;
       if (this.t > DRAG_GREEN + 25 && !this.dnf) this.dnf = true;
@@ -159,6 +164,7 @@ class DragCar {
     const tr = m * this.acc * 0.5 / 2.6;
     const Nr = U.clamp(m * g * 0.48 + tr, m * g * 0.3, m * g), Fmax = s.mu * Nr;
     let Ft;
+    if (s.lc && this.t - this.launchT < 3.5 && Fd > Fmax * 0.97) Fd = Fmax * 0.97;   // launch control: kola se nehrabou
     if (this.spin) { Ft = Fmax * 0.75; this.ws += (Fd - Ft) / 70 * h; if (this.ws <= this.v) { this.ws = this.v; this.spin = false; } }
     else if (Fd > Fmax) { this.spin = true; Ft = Fmax * 0.75; this.ws = this.v + 0.05; }
     else Ft = Fd;
@@ -228,7 +234,7 @@ const Drag = {
     return { engine: { hp: r.hp, red: r.red, kg: 0, lay: r.lay, cyl: r.cyl }, ind: { mul: r.indMul || 1, ind: r.ind || 0, lag: r.lag || 0, blower: r.blower || 0 },
       gb: { gears: r.gears, shift: r.shift }, tires: { mu: r.mu, slick: r.mu > 1.4 ? 1 : 0 }, nitro: { hp: r.nitro ? r.nitro[0] : 0, dur: r.nitro ? r.nitro[1] : 0 },
       weight: { kg: r.kg - 1100 }, jet: { N: r.jet ? r.jet[0] : 0, size: r.jet ? r.jet[1] : 0 }, rocket: { N: r.rocket ? r.rocket[0] : 0, dur: r.rocket ? r.rocket[1] : 0, size: r.rocket ? r.rocket[2] : 0 },
-      wbar: { on: r.wbar || 0 }, chute: { on: r.chute || 0 } };
+      wbar: { on: r.wbar || 0 }, chute: { on: r.chute || 0 }, lc: { on: 0 } };
   },
   stats(b, minMass) {
     const e = b.engine, n = b.gb.gears;
@@ -239,7 +245,7 @@ const Drag = {
     const fin = (e.red * Math.PI / 30 * WR) / (vtop * ratios[n - 1]);
     return { hp: e.hp, red: e.red, mass, mu: b.tires.mu, ratios, fin, shift: b.gb.shift, ind: b.ind.ind || 0, indMul: b.ind.mul || 1, lag: b.ind.lag || 0,
       nitroHP: b.nitro.hp || 0, nitroDur: b.nitro.dur || 0, jetN: b.jet.N || 0, rocketN: b.rocket.N || 0, rocketDur: b.rocket.dur || 0,
-      wbar: !!b.wbar.on, chute: !!b.chute.on, lay: e.lay, cyl: e.cyl, vtop };
+      wbar: !!b.wbar.on, chute: !!b.chute.on, lc: !!(b.lc && b.lc.on), lay: e.lay, cyl: e.cyl, vtop };
   },
   vis(b) { return { jet: b.jet.N ? b.jet.size : 0, rocket: b.rocket.N ? b.rocket.size : 0, slick: b.tires.slick || 0, wbar: b.wbar.on ? 1 : 0, chute: b.chute.on ? 1 : 0, blower: b.ind.blower || 0, turbo: b.ind.ind === 1 ? 1 : 0 }; },
   // odhad času na čtvrt míle (simulace s ideálním řidičem)
@@ -498,8 +504,9 @@ const Drag = {
 
   // ---------- závod ----------
   myBuild() {
-    if (this.sb) { const { b, st } = this.sbBuild(); return { stats: st, vis: this.vis(b), paint: this.sbv.paint, cosm: Object.assign({}, this.sbv.cosm) }; }
-    const b = this.eqBuild(this.sv); return { stats: this.stats(b), vis: Object.assign(this.vis(b), { body: Dealer.sel() }), paint: this.sv.paint, cosm: Object.assign({}, this.sv.cosm) }; },
+    if (this.sb) { const { b, st } = this.sbBuild(); if (st.lc) st.lcR = this.estimate(st).lr; return { stats: st, vis: this.vis(b), paint: this.sbv.paint, cosm: Object.assign({}, this.sbv.cosm) }; }
+    const b = this.eqBuild(this.sv), st = this.stats(b); if (st.lc) st.lcR = this.estimate(st).lr;
+    return { stats: st, vis: Object.assign(this.vis(b), { body: Dealer.sel() }), paint: this.sv.paint, cosm: Object.assign({}, this.sv.cosm) }; },
   startAI(i) {
     const r = RIVALS[i], b = this.rivalBuild(r);
     const mine = this.myBuild();
@@ -858,6 +865,7 @@ const Drag = {
     if (c.s.rocketN) info += `<div>RAKETA: ${c.rocketT < 0 ? `<b>připravena (${Settings.keyName(Settings.key('rocket'))})</b>` : c.rocketOn ? '<b style="color:#ffb040">HOŘÍ!</b>' : 'vyhořelá'}</div>`;
     if (c.s.jetN) info += `<div>TURBÍNA ${Math.round(c.jet * 100)} %</div>`;
     if (c.ind === 1 || c.s.ind) info += `<div>${c.s.ind === 1 ? 'TURBO' : 'KOMPRESOR'} ${Math.round(c.boost * 100)} %</div>`;
+    if (c.s.lc && (!c.launched || c.t - c.launchT < 3.5)) info += `<div style="color:#8fff9a;font-weight:800">LAUNCH CONTROL ${c.launched ? 'hlídá prokluz' : c.thr > 0.3 ? 'připraven ✔' : '– drž plyn'}</div>`;
     if (c.wh > 0.12 && !c.finished) info += '<div style="color:#ffcf86;font-weight:800">WHEELIE!</div>';
     if (c.spin && c.launched && !c.finished) info += '<div style="color:#ff8a6a;font-weight:800">PROKLUZ!</div>';
     $('dragInfo').innerHTML = info;

@@ -49,6 +49,10 @@ const RALLY_CATS = [
     { n: 'Karbonové díly', d: '1100 kg.', mass: 1100, price: 4000, lvl: 5 },
     { n: 'Kevlar a plexi', d: '1030 kg.', mass: 1030, price: 8000, lvl: 8 },
   ] },
+  { id: 'launch', name: 'Launch control', items: [
+    { n: 'Bez launch controlu', d: 'Rozjezd je jen na tobě a tvé noze.', lc: 0, price: 0, lvl: 1 },
+    { n: 'Launch control', d: 'Na startu drží ideální otáčky a při rozjezdu hlídá prokluz kol – auto vystřelí bez hrabání. Odemkneš ho, když 5× splníš úkol Zaklepat 20 kuželů.', lc: 1, price: 0, lvl: 1, cones: 5 },
+  ] },
 ];
 // doplňky: [klíč, cena, popis]; extra = vlastní rally doplňky, ostatní jsou společné COSM
 const RALLY_LOOK = [
@@ -59,7 +63,7 @@ const RALLY_LOOK = [
 ];
 const RALLY_CALLS = [['Levá!', 'Digit1'], ['Pravá!', 'Digit2'], ['Vracák!', 'Digit3'], ['Brzdi!', 'Digit4'], ['Naplno!', 'Digit5'], ['Skok!', 'Digit6'], ['Pomalu, opatrně', 'Digit7'], ['Dobrý, dobrý!', 'Digit8']];
 const RALLY_TEAM_COL = ['#ffb347', '#5ab0ff'];
-const RALLY_HIT = { tree: 4.6, joshua: 3.6, rock: 5.6, cactus: 1.2, pole: 0.25, pine: 4.8, oak: 5.2, bush: 0.3, rail: 1.3, cone: 0 };
+const RALLY_HIT = { tree: 4.6, joshua: 3.6, rock: 5.6, cactus: 1.2, pole: 0.25, pine: 4.8, oak: 5.2, bush: 0.3, rail: 1.3, cone: 0, wall: 6, fence: 1.4, lamp: 3.2 };
 
 const Rally = {
   active: false, mode: null, tab: 'stage', sel: 0, stages: {},
@@ -82,7 +86,7 @@ const Rally = {
     const e = this.part('engine', sv), t = this.part('turbo', sv), g = this.part('gearbox', sv), s = this.part('susp', sv), b = this.part('brakes', sv), w = this.part('weight', sv), ti = this.part('tires', sv);
     const extraKg = (sv.cosm.front === 'bullbar' ? 18 : 0) + (sv.ex.skid ? 14 : 0) + (sv.cosm.roof === 'lightbar' ? 8 : 0);
     return { hp: e.hp, red: e.red, boost: t.boost, lag: t.lag, als: !!t.als, ratios: g.ratios, final: g.final, shift: g.shift, mass: w.mass + extraKg, brake: b.brake,
-      land: s.land * (sv.ex.skid ? 0.5 : 1), springK: s.k || 1, tire: { c: ti.c, tier: ti.tier * s.grip }, tireName: ti.n, bull: sv.cosm.front === 'bullbar', aero: sv.cosm.rear === 'wing' ? 0.06 : 0, auto: !!sv.auto };
+      land: s.land * (sv.ex.skid ? 0.5 : 1), springK: s.k || 1, tire: { c: ti.c, tier: ti.tier * s.grip }, tireName: ti.n, lc: !!this.part('launch', sv).lc, bull: sv.cosm.front === 'bullbar', aero: sv.cosm.rear === 'wing' ? 0.06 : 0, auto: !!sv.auto };
   },
   look(sv) { sv = sv || this.sv; return { body: Dealer.sel(), paint: sv.paint, cosm: Object.assign({}, sv.cosm), ex: Object.assign({}, sv.ex), num: sv.num }; },
   gripOn(st, surf) { return RALLY_SURF[surf].mu * RALLY_COMPOUND[st.tire.c][surf] * st.tire.tier; },
@@ -227,10 +231,11 @@ const Rally = {
       const cat = RALLY_CATS.find(c => c.id === this.tab), own = sv.own[cat.id];
       if (cat.id === 'tires') l += `<div style="font-size:13px;opacity:.85;margin-bottom:6px">Každá směs drží nejlíp na svém povrchu. Další etapa: <b>${Object.entries(stage.mix).map(([k, w]) => `${RALLY_SURF[k].name} ${Math.round(w * 100)} %`).join(', ')}</b></div>`;
       cat.items.forEach((it, i) => {
-        const has = own.includes(i), eq = sv.eq[cat.id] === i, locked = sv.lvl < it.lvl;
+        const has = own.includes(i), eq = sv.eq[cat.id] === i, coneLock = it.cones && (sv.coneWins || 0) < it.cones, locked = sv.lvl < it.lvl || coneLock;
         let extra = '';
+        if (it.cones) extra = `<i>🔶 úkol Zaklepat 20 kuželů splněn ${Math.min(sv.coneWins || 0, it.cones)} / ${it.cones}×</i>`;
         if (cat.id === 'tires') extra = `<i>asfalt ${(RALLY_COMPOUND[it.c].asphalt * it.tier).toFixed(2)} · šotolina ${(RALLY_COMPOUND[it.c].gravel * it.tier).toFixed(2)} · písek ${(RALLY_COMPOUND[it.c].sand * it.tier).toFixed(2)}</i>`;
-        const btn = eq ? '<span class="gOk">✔ namontováno</span>' : has ? `<button data-req="${i}">Namontovat</button>` : locked ? `<span class="gLock">🔒 lvl ${it.lvl}</span>` : `<button data-rbuy="${i}" ${sv.money < it.price ? 'disabled' : ''}>Koupit ${it.price.toLocaleString('cs-CZ')} Kč</button>`;
+        const btn = eq ? '<span class="gOk">✔ namontováno</span>' : has ? `<button data-req="${i}">Namontovat</button>` : coneLock ? `<span class="gLock">🔒 ${sv.coneWins || 0}/${it.cones} 🔶</span>` : locked ? `<span class="gLock">🔒 lvl ${it.lvl}</span>` : `<button data-rbuy="${i}" ${sv.money < it.price ? 'disabled' : ''}>${it.price ? `Koupit ${it.price.toLocaleString('cs-CZ')} Kč` : 'Namontovat zdarma'}</button>`;
         l += `<div class="gItem${eq ? ' eq' : ''}${locked && !has ? ' lock' : ''}"><div><b>${it.n}</b><span>${it.d}</span>${extra}</div>${btn}</div>`;
       });
     }
@@ -245,7 +250,7 @@ const Rally = {
     else if (d.rpick !== undefined) { this.pick = +d.rpick < 0 ? null : +d.rpick; if (this.tab === 'stage') $('rgList').scrollTop = 0; }
     else if (d.rbuy !== undefined) {
       const it = RALLY_CATS.find(c => c.id === this.tab).items[+d.rbuy];
-      if (sv.money < it.price || sv.lvl < it.lvl) return;
+      if (sv.money < it.price || sv.lvl < it.lvl || (it.cones && (sv.coneWins || 0) < it.cones)) return;
       sv.money -= it.price; sv.own[this.tab].push(+d.rbuy); sv.eq[this.tab] = +d.rbuy; Sfx.coin(); Sfx.install();
     } else if (d.req !== undefined) { sv.eq[this.tab] = +d.req; Sfx.install(); }
     else if (d.rpaint) { sv.paint = +d.rpaint; Sfx.spray(); this.refreshCar(); }
@@ -357,7 +362,7 @@ const Rally = {
     if (Confetti) Confetti.stop();
     const S = this.cur = this.stageScene(opt.idx), tr = S.tr;
     // obnov rozbité tyčky a kaktusy z minulé jízdy
-    for (const o of tr.objs) if (o.broken) { o.broken = false; for (const e of o.inst) { e.im.setMatrixAt(e.i, e.m); e.im.instanceMatrix.needsUpdate = true; } }
+    for (const o of tr.objs) if (o.broken) { o.broken = false; for (const e of o.inst || []) { e.im.setMatrixAt(e.i, e.m); e.im.instanceMatrix.needsUpdate = true; } }
     if (this.teams) for (const t of this.teams) this.disposeTeam(t);
     this.aiClear();
     for (const p of S.dust) { p.life = 0; p.s.visible = false; }
@@ -374,16 +379,27 @@ const Rally = {
     this.my = this.teams.find(t => t.mine);
     this.my.hands = Hands.carRig(this.my.parts);
     this.clock = -5.5; this.started = false; this.finished = false; this.over = false; this.overT = 0; this._shown = false;
+    this.finishS = null;
+    if (opt.net && this.teams.length > 1) this.teams.forEach((t, i) => {
+      const row = Math.floor(i / 2), g = this.aiGridPos(tr, 72 - row * 10, (i % 2 ? 1 : -1) * 1.75);
+      Object.assign(t.pose, { x: g.x, z: g.z, y: g.y, h: g.h, s: g.s });
+      t.gridS = g.s;
+      if (t.car) t.car.reset(g.x, g.z, g.h, g.y);
+    });
     this.sProg = 0; this.nc = 0; this.callT = 0; this.splitsHit = []; this.penalty = 0; this.repair = 0; this.helpOn = false; this.remoteHelp = false;
     this.sendT = 0; this.msgT = 0; this.escT = 0; this.coLeft = false; this.aiCodriverOn = undefined; this._preCall = false; this.wheelT = 0; this._cp = null; this.tabT = 0; this.cdNext = 0; this.lastCount = 99; this.hits = 0; this.cones = 0;
     if (this.role === 'codriver') this.makeTablet(this.my.parts);
     this.camMode = this.role === 'codriver' ? 'co' : (this.sv.cam || 'chase'); this.setCam(this.camMode);
     try { this.czVoice(); } catch (e) { /* bez hlasu */ }
     if (this.role === 'driver') this.voicePrefetch();
+    if (this.my.gridS !== undefined) {   // zadní řada má cíl o rozestup řad dřív → stejná délka pro všechny
+      this.sProg = this.my.gridS; this.finishS = tr.len - 12 - (this.teams[0].gridS - this.my.gridS);
+    }
     this.say(null); this.callT = 0; $('rhCall').style.opacity = 0; $('rhCount').style.opacity = 0; $('rhRepair').style.display = 'none';
     this.msg(this.role === 'codriver' ? `Jsi spolujezdec! Řiď ${this.my.nick} hlasem – rozpis máš na tabletu v rukou (1–8 a Enter)` : opt.net && this.my.co >= 0 ? `Řídíš! ${Net.nickOf(this.my.co)} ti bude hlásit trať` : 'Spolujezdec AI hlásí zatáčky. Vydrž do cíle!', 4);
     $('rhStage').textContent = S.stage.name;
     if (opt.ai) { this.aiSetup(); { const ms = this.meSlot || 0; this.msg(`Závod se ${RALLY_AI_N} AI soupeři – los: startuješ ${ms + 1}. z 4${ms === 0 ? ' – pole position!' : ', předjeď je!'}`, 4); } }
+    if (this.my.car && this.my.car.s.lc && this.role !== 'codriver' && !opt.ai) this.msg('🚀 Launch control připraven – na startu drž plyn naplno', 3.5, 'good');
     $('rhTabBtns').innerHTML = RALLY_CALLS.map(([t], i) => `<button data-call="${i}"><b>${i + 1}</b> ${t}</button>`).join('') + '<button data-call="-1" class="next"><b>Enter</b> další pokyn</button>';
   },
   // fyzický tablet v rukou spolujezdce (textura = plátno rozpisu)
@@ -717,7 +733,7 @@ const Rally = {
       if (this.sendT <= 0) { this.sendT = 1 / 30; Net.send(this.stateMsg()); }
     }
     // konec
-    if (!this.over && this.teams.every(t => t.res)) { this.over = true; this.overT = 2.6; }
+    if (!this.over && (this.teams.every(t => t.res) || this.opt.net && this.my.res && this.teams.every(t => t.res || this.cantBeat(t)))) { this.over = true; this.overT = 2.6; }
     if (this.over) { this.overT -= dt; if (this.overT <= 0 && !this._shown) { this._shown = true; this.results(); } }
     const sun = S.sun, p = me.pose; U.snapSun(sun, p, this._sunDir || (this._sunDir = new THREE.Vector3(30, 70, 25)), 80);
     r.shadowMap.needsUpdate = true;
@@ -754,7 +770,7 @@ const Rally = {
           this.msg(`Mezičas ${i + 1}: ${this.fmt(t)}${ref ? ` (${t <= ref ? '−' : '+'}${Math.abs(t - ref).toFixed(2)})` : ''}`, 2.5, ref && t > ref ? 'bad' : 'good');
         }
       });
-      if (this.sProg >= tr.len - 12) this.finish(false);
+      if (this.sProg >= (this.finishS || tr.len - 12)) this.finish(false);
       if (c.dmg.engine >= 100) this.finish(true, 'Motor je na odpis');
       if (nr && nr.d > 45) this.msg('Jsi daleko od trati – X = návrat (+5 s)', 0.5, 'warn');
     }
@@ -840,7 +856,7 @@ const Rally = {
   breakObj(o, nx, nz, quiet) {
     o.broken = true;
     const ang = Math.atan2(-nx, -nz), M = new THREE.Matrix4().compose(new THREE.Vector3(o.x - nx * 0.6, o.y + 0.08, o.z - nz * 0.6), new THREE.Quaternion().setFromEuler(new THREE.Euler(1.45, ang, 0, 'YXZ')), new THREE.Vector3(o.sc || 1, o.sc || 1, o.sc || 1));
-    for (const e of o.inst) { e.im.setMatrixAt(e.i, M); e.im.instanceMatrix.needsUpdate = true; }
+    for (const e of o.inst || []) { e.im.setMatrixAt(e.i, M); e.im.instanceMatrix.needsUpdate = true; }
     if (!quiet) Sfx.burst(0.12, o.kind === 'pole' ? 900 : 300, 0.2, 'lowpass');
   },
   // px, pz = bod nárazu relativně ke středu auta (svět), n = normála ven z překážky
@@ -1289,7 +1305,7 @@ const Rally = {
   results() {
     const me = this.my, sv = this.sv, stage = this.cur.stage, tr = this.cur.tr, res = me.res;
     const ai = !!this.ais, ffa = !!this.opt.ffa;
-    const ranked = ai ? this.aiRanked() : this.teams.slice().sort((a, b) => (a.res.dnf ? 1 : 0) - (b.res.dnf ? 1 : 0) || (a.res.time || 1e9) - (b.res.time || 1e9));
+    const ranked = ai ? this.aiRanked() : this.netRanked();
     const multi = this.teams.length > 1, won = !res.dnf && ranked[0] === me;
     const medal = res.dnf ? 0 : this.medal(stage, res.time, tr.par);
     const pos = ai || ffa ? ranked.indexOf(me) + 1 : 0, posK = (ai || ffa) && !res.dnf ? [1.5, 1.3, 1.15][pos - 1] || 1 : 1;   // bonus za umístění v závodě s AI
@@ -1297,7 +1313,8 @@ const Rally = {
     if (!res.dnf) money = Math.round(stage.reward * [1, 1.1, 1.25, 1.5][medal] * (multi && won ? 1.25 : 1) * posK);
     xp = Math.round(stage.xp * (res.dnf ? 0.3 : [1, 1.1, 1.25, 1.5][medal]) * (multi && won ? 1.25 : 1) * posK);
     const coneOk = !res.dnf && this.cones >= RALLY_CONE_GOAL, coneBonus = coneOk ? 500 + stage.n * 90 : 0;
-    if (coneOk) { money += coneBonus; xp += 60; }
+    let lcNew = false;
+    if (coneOk) { money += coneBonus; xp += 60; const was = sv.coneWins || 0; sv.coneWins = was + 1; lcNew = was < 5 && sv.coneWins >= 5; }
     const clean = !res.dnf && (res.dmg || 0) < 40;
     if (clean) { money += Math.round(stage.reward * 0.15); xp += 20; }
     const repair = Math.round((res.dmg || 0) * (this.opt.net && me.co >= 0 ? 0.5 : 1));
@@ -1321,9 +1338,11 @@ const Rally = {
     let txt = res.dnf ? `Nedojeli jste – ${res.why || 'DNF'}.` : `Čas ${this.fmt(res.time)} · ${mName} (zlato pod ${this.fmt(tr.par * 1.06)}).${pbTxt}`;
     if (multi && !ffa) txt = (won ? 'Vaše posádka vyhrála! ' : res.dnf ? '' : 'Druhá posádka byla rychlejší. ') + txt;
     if ((ai || ffa) && !res.dnf) txt = `Dojel jsi ${pos}. z ${ranked.length}!${posK > 1 ? ` Bonus za umístění ×${posK}.` : ''} ` + txt;
-    const rows = ranked.map((t, i) => ({ me: t.mine, col: t.col || RALLY_TEAM_COL[t.id % 2], cells: [(ai || ffa ? i + 1 + '. ' : '') + String(t.crew).replace(/[<>&]/g, ''), t.res.dnf ? (t.res.left ? 'odpojen' : 'DNF') : (t.res.est ? '~' : '') + this.fmt(t.res.time), t.res.dnf || !ranked[0].res.time ? '—' : '+' + (t.res.time - ranked[0].res.time).toFixed(2), t.res.dmg !== undefined ? t.res.dmg.toLocaleString('cs-CZ') + ' Kč' : '—'] }));
+    const rows = this.resRows(ranked, ai || ffa);
     let rew = `<div class="rwd"><span>💰 +${money.toLocaleString('cs-CZ')} Kč</span><span>🔧 oprava −${repair.toLocaleString('cs-CZ')} Kč</span><span>⭐ +${xp} XP</span></div>`;
     rew += `<div style="margin-top:4px;font-weight:700;color:${coneOk ? '#8fff9a' : '#ffb347'}">🔶 Zaklepat 20 kuželů: ${this.cones}/${RALLY_CONE_GOAL} – ${coneOk ? `splněno! +${coneBonus.toLocaleString('cs-CZ')} Kč, +60 XP` : res.dnf ? 'nedojeli jste' : `chybělo ${RALLY_CONE_GOAL - this.cones}, úkol nesplněn`}</div>`;
+    if (coneOk && !lcNew && (sv.coneWins || 0) < 5) rew += `<div style="opacity:.85;margin-top:2px">Launch control: úkol s kužely splněn ${sv.coneWins}/5×</div>`;
+    if (lcNew) rew += '<div class="lvlup">🚀 ODEMČEN LAUNCH CONTROL! Namontuj ho v servisu (záložka Launch control).</div>';
     rew += `<div style="opacity:.85;margin-top:4px">Celkem ${net >= 0 ? '+' : ''}${net.toLocaleString('cs-CZ')} Kč${clean ? ' · bonus za čistou jízdu' : ''}</div>`;
     for (const [l, b] of ups) rew += `<div class="lvlup">LEVEL ${l}! Bonus ${b.toLocaleString('cs-CZ')} Kč a nové díly v servisu</div>`;
     const btns = [];
@@ -1339,6 +1358,7 @@ const Rally = {
     }
     btns.push({ label: '🔧 Do servisu', alt: true, fn: () => { this.exit(); this.enterGarage(); } });
     this.say(null);
+    this._resCols = ['Posádka', 'Čas', 'Ztráta', 'Oprava'];
     Game.showResults({ win: ai ? !res.dnf && pos <= 3 : ffa ? !res.dnf && pos === 1 : !res.dnf && (!multi || won) && medal > 0, title: res.dnf ? 'NEDOJELI JSTE' : ai || ffa ? (pos === 1 ? 'VYHRÁL JSI!' : `${pos}. MÍSTO`) : multi ? (won ? 'VYHRÁLI JSTE!' : 'DRUZÍ') : medal ? 'V CÍLI!' : 'DOJELI JSTE', text: txt, cols: ['Posádka', 'Čas', 'Ztráta', 'Oprava'], rows, reward: rew, buttons: btns });
   },
 
@@ -1361,13 +1381,38 @@ const Rally = {
     else if (d.t === 'rhelp') { if (t.mine) this.remoteHelp = !!d.on; }
     else if (d.t === 'rpart') { if (!t.car) this.detachPart(t, String(d.name)); }
     else if (d.t === 'rhit') { if (!t.car) this.dent(t.parts, d.lx, 0.65, d.lz, d.nx, d.nz, d.dep); }
-    else if (d.t === 'rfin') { if (!t.res) t.res = { dnf: d.dnf, time: d.time, dmg: d.dmg, why: d.why }; if (t.mine && this.role === 'codriver') { this.finished = true; this.msg(d.dnf ? 'DNF – ' + (d.why || '') : 'CÍL! ' + this.fmt(d.time), 3, d.dnf ? 'bad' : 'good'); } }
+    else if (d.t === 'rfin') { if (!t.res) { t.res = { dnf: d.dnf, time: d.time, dmg: d.dmg, why: d.why }; this.refreshRes(); } if (t.mine && this.role === 'codriver') { this.finished = true; this.msg(d.dnf ? 'DNF – ' + (d.why || '') : 'CÍL! ' + this.fmt(d.time), 3, d.dnf ? 'bad' : 'good'); } }
+  },
+  // posádka, která ještě jede, už mě nepředjede (její běžící čas je horší než můj výsledný)
+  cantBeat(t) {
+    const me = this.my.res;
+    if (!me || me.dnf) return true;
+    const tm = t.mine ? null : t.net ? t.net.tm : null;
+    return tm !== null && tm !== undefined && tm > me.time;
+  },
+  // pořadí v MP: dojetí podle času, pak ti, co ještě jedou (podle ujeté trati), nakonec DNF
+  netRanked() {
+    const k = (t) => !t.res ? 1 : t.res.dnf ? 2 : 0;
+    return this.teams.slice().sort((a, b) => k(a) - k(b) || (k(a) === 0 ? a.res.time - b.res.time : k(a) === 1 ? (b.pose.s || 0) - (a.pose.s || 0) : 0));
+  },
+  resRows(ranked, num) {
+    const best = ranked[0] && ranked[0].res && !ranked[0].res.dnf ? ranked[0].res.time : null, len = this.cur.tr.len;
+    return ranked.map((t, i) => {
+      const r = t.res, nm = (num ? i + 1 + '. ' : '') + String(t.crew).replace(/[<>&]/g, '');
+      if (!r) return { me: t.mine, col: t.col || RALLY_TEAM_COL[t.id % 2], cells: [nm, `jede… ${Math.round(U.clamp((t.pose.s || 0) / len, 0, 1) * 100)} %`, '—', '—'] };
+      return { me: t.mine, col: t.col || RALLY_TEAM_COL[t.id % 2], cells: [nm, r.dnf ? (r.left ? 'odpojen' : 'DNF') : (r.est ? '~' : '') + this.fmt(r.time), r.dnf || best === null ? '—' : '+' + (r.time - best).toFixed(2), r.dmg !== undefined ? r.dmg.toLocaleString('cs-CZ') + ' Kč' : '—'] };
+    });
+  },
+  // dojel další hráč, zatímco už mám výsledky → překreslit tabulku
+  refreshRes() {
+    if (!this._shown || this.ais || !this.opt.net || $('race').style.display !== 'flex') return;
+    Game.resTable({ cols: this._resCols, rows: this.resRows(this.netRanked(), !!this.opt.ffa) });
   },
   netLeft(slot) {
     if (!this.teams) return;
     for (const t of this.teams) {
       if (slot >= 0 && t.co === slot && t.mine && this.role === 'driver') { this.coLeft = true; this.msg('Spolujezdec se odpojil – hlásí AI', 3, 'warn'); continue; }
-      if ((slot < 0 && !t.car) || t.driver === slot) if (!t.res) { t.res = { dnf: true, left: true }; if (!t.car) this.msg('Posádka se odpojila', 2, 'bad'); }
+      if ((slot < 0 && !t.car) || t.driver === slot) if (!t.res) { t.res = { dnf: true, left: true }; if (!t.car) this.msg('Posádka se odpojila', 2, 'bad'); this.refreshRes(); }
     }
   },
 };

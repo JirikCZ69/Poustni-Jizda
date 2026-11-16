@@ -105,7 +105,16 @@ class RallyCar {
       if (this.revT > 0.35) { this.gear = -1; this.shiftT = 0.25; this.revT = 0; }
       else if (this.gear === -1 && (inp.thr > 0.5 || s.noRev) && this.vf > -0.6) { this.gear = 1; this.shiftT = 0.25; }
     }
-    const rev = this.gear === -1, thrIn = rev && s.auto ? this.brk : this.thr, brkIn = rev && s.auto ? this.thr : this.brk;
+    const rev = this.gear === -1, brkIn = rev && s.auto ? this.thr : this.brk;
+    let thrIn = rev && s.auto ? this.brk : this.thr;
+    // launch control: z místa drží ideální otáčky spojky a ~3,5 s hlídá prokluz (ubere plyn, když se kola hrabou)
+    if (s.lc) {
+      if (this.speed < 0.6) this.lcT = 0; else this.lcT = (this.lcT || 0) + dt;
+      this.lcOn = !rev && this.gear >= 1 && this.gear <= 2 && this.lcT < 3.5 && thrIn > 0.3;
+      const slip = Math.max(this._kR || 0, this._kF || 0), lim = (this._kpR || 0.15) * 1.15;
+      this.lcK = this.lcOn ? U.clamp((this.lcK || 1) + (slip > lim ? -dt * 7 : dt * 2.5), 0.4, 1) : 1;
+      thrIn *= this.lcK;
+    } else this.lcOn = false;
     // turbo
     const spool = U.clamp((this.rpm - s.red * 0.32) / (s.red * 0.3), 0, 1), bt = s.boost ? (s.als ? Math.max(0.75, thrIn) : thrIn) * spool : 0;
     this.boost += (bt - this.boost) * Math.min(1, dt * (bt > this.boost ? 1.6 / (s.lag || 1) : 4));
@@ -167,7 +176,7 @@ class RallyCar {
       // motor → nápravy
       const ratio = this.ratio(), shifting = this.shiftT > 0, wAvg = (this.wF + this.wR) / 2;
       let rpm = Math.abs(wAvg * ratio) * 30 / Math.PI;
-      const clutchRpm = 1000 + thrIn * (s.red * 0.42);
+      const clutchRpm = this.lcOn ? s.red * 0.58 : 1000 + thrIn * (s.red * 0.42);   // launch control: spojka na ideálních otáčkách
       const slipping = (this.gear === 1 || rev) && rpm < clutchRpm;
       if (slipping || shifting || !ratio) rpm = U.lerp(this.rpm, shifting ? this.rpm * 0.985 : Math.max(900, clutchRpm * (slipping ? 1 : thrIn)), Math.min(1, h * 6));
       rpm = Math.max(800, rpm);

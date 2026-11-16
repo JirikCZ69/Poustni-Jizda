@@ -19,7 +19,7 @@ DATA_DIR = os.environ.get('PJ_DATA') or os.path.join(ROOT, 'data')
 DB_PATH = os.path.join(DATA_DIR, 'leaderboard.json')
 SAVE_DIR = os.path.join(DATA_DIR, 'saves')     # postup hry každého účtu (rally, drag, perky…)
 TTS_DIR = os.path.join(DATA_DIR, 'tts')        # cache hlášení spolujezdce
-import hfsync, ttspiper                                  # záloha dat do HF datasetu (jen na hostingu)
+import hfsync, ttspiper, wsrelay                                  # záloha dat do HF datasetu (jen na hostingu)
 hfsync.restore(DATA_DIR)
 SAVE_MAX = 600_000
 MAX_USERS = 20_000
@@ -32,6 +32,7 @@ TTS_LOCK = threading.Lock()
 TTS_TEXT_RE = re.compile(r'^[\w\s.,!?…:;()%+\'"–-]{1,180}$', re.UNICODE)
 
 # veřejné soubory – nic jiného server nevydá
+HOST_RE = re.compile(r'^[A-Za-z0-9.-]{1,100}(:\d{1,5})?$')
 JS_RE = re.compile(r'^/js/[a-z0-9_]{1,40}\.js$')
 CTYPES = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; charset=utf-8'}
 CSP = ("default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://unpkg.com; "
@@ -85,6 +86,105 @@ class Limiter:
             return min(self.burst, tok + (now - t) * self.rate) >= 1
 
 
+# ---------- STUN/TURN pro multiplayer (WebRTC) ----------
+# Bez TURN serveru se hráči spojí jen tehdy, když jim sítě dovolí přímé spojení (mobilní data, CGNAT a přísné
+# routery ne). TURN se nastaví v prostředí: buď Cloudflare (CF_TURN_KEY_ID + CF_TURN_TOKEN, krátkodobé
+# přihlašovací údaje generuje server), nebo libovolný TURN se statickým heslem (TURN_URLS, TURN_USER, TURN_PASS).
+ICE_STUN = [{'urls': ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478']}]
+# Hlídání limitu: Cloudflare dává 1000 GB TURN přenosu měsíčně zdarma. Hry hlásí, kolik dat jim šlo přes TURN
+# (/api/turnuse), server to sčítá po měsících a po dosažení rozpočtu TURN přestane rozdávat (zbude jen přímé spojení).
+TURN_BUDGET = float(os.environ.get('PJ_TURN_BUDGET_GB') or 500) * 1e9   # bezpečně pod 1000 GB zdarma
+TURN_OFF = os.environ.get('PJ_TURN_OFF') == '1'                          # nouzový vypínač
+TURN_USAGE_FILE = os.path.join(DATA_DIR, 'turn_usage.json')
+_ice_cache = {'t': 0, 'v': None}
+_ice_lock = threading.Lock()
+
+
+def turn_keys():
+    kid, tok = os.environ.get('CF_TURN_KEY_ID', '').strip(), os.environ.get('CF_TURN_TOKEN', '').strip()
+    if not (kid and tok):   # lokálně: data/turn.json (data/ není v gitu)
+        try:
+            with open(os.path.join(DATA_DIR, 'turn.json'), encoding='utf-8') as f:
+                d = json.load(f)
+            kid, tok = str(d.get('cf_key_id', '')).strip(), str(d.get('cf_token', '')).strip()
+        except (OSError, ValueError, AttributeError):
+            pass
+    ok = re.fullmatch(r'[A-Za-z0-9_-]{8,80}', kid or '') and re.fullmatch(r'[A-Za-z0-9_.-]{8,200}', tok or '')
+    return (kid, tok) if ok else (None, None)
+
+
+def turn_usage():
+    """{'m': '2026-11', 'b': bajty tento měsíc, 'n': vydané přihlašovací údaje} – nový měsíc = od nuly."""
+    m = time.strftime('%Y-%m', time.gmtime())
+    try:
+        with open(TURN_USAGE_FILE, encoding='utf-8') as f:
+            u = json.load(f)
+        if isinstance(u, dict) and u.get('m') == m:
+            return {'m': m, 'b': float(u.get('b') or 0), 'n': int(u.get('n') or 0)}
+    except (OSError, ValueError, TypeError):
+        pass
+    return {'m': m, 'b': 0.0, 'n': 0}
+
+
+def turn_usage_save(u):
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        tmp = TURN_USAGE_FILE + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            json.dump(u, f)
+        os.replace(tmp, TURN_USAGE_FILE)
+    except OSError:
+        pass
+
+
+def turn_allowed(u=None):
+    return not TURN_OFF and (u or turn_usage())['b'] < TURN_BUDGET
+
+
+def turn_add(nbytes):
+    with _ice_lock:
+        u = turn_usage()
+        was = turn_allowed(u)
+        u['b'] += nbytes
+        turn_usage_save(u)
+        if was and not turn_allowed(u):
+            _ice_cache['v'] = None   # rozpočet vyčerpán → hned přestat rozdávat TURN
+            print('[TURN] měsíční rozpočet vyčerpán (%.1f GB) – TURN vypnut do konce měsíce' % (u['b'] / 1e9), flush=True)
+
+
+def ice_servers():
+    with _ice_lock:
+        now = time.time()
+        if _ice_cache['v'] is not None and now - _ice_cache['t'] < 1800:
+            return _ice_cache['v']
+        out = list(ICE_STUN)
+        u = turn_usage()
+        if turn_allowed(u):
+            kid, tok = turn_keys()
+            if kid:
+                try:
+                    # jedny sdílené údaje na 30 min (platí 2 h) → málo vydaných klíčů a staré po čase přestanou fungovat
+                    req = urllib.request.Request(
+                        'https://rtc.live.cloudflare.com/v1/turn/keys/%s/credentials/generate-ice-servers' % kid,
+                        data=json.dumps({'ttl': 2 * 3600}).encode(), method='POST',
+                        headers={'Authorization': 'Bearer ' + tok, 'Content-Type': 'application/json'})
+                    with urllib.request.urlopen(req, timeout=6) as r:
+                        d = json.loads(r.read(200000).decode())
+                    ice = d.get('iceServers')
+                    if isinstance(ice, dict):
+                        ice = [ice]
+                    if isinstance(ice, list):
+                        out += [s for s in ice if isinstance(s, dict) and s.get('urls')][:6]
+                    u['n'] += 1
+                    turn_usage_save(u)
+                except Exception as e:  # noqa: BLE001 – bez TURN to pořád jde (aspoň přímé spojení)
+                    print('[TURN] Cloudflare údaje se nepodařilo získat:', type(e).__name__, flush=True)
+            urls = [x.strip() for x in os.environ.get('TURN_URLS', '').split(',') if x.strip().startswith(('turn:', 'turns:'))]
+            if urls:
+                out.append({'urls': urls[:6], 'username': os.environ.get('TURN_USER', ''), 'credential': os.environ.get('TURN_PASS', '')})
+        _ice_cache['t'], _ice_cache['v'] = now, out
+        return out
+
 LIM_HTTP = Limiter(40, 400)           # všechny požadavky z IP (načtení hry ~35 souborů)
 LIM_API = Limiter(5, 60)              # API z IP
 LIM_REG = Limiter(5 / 3600, 5)        # registrace: 5 za hodinu z IP
@@ -93,6 +193,9 @@ LIM_LOGIN_NAME = Limiter(20 / 600, 20)  # neúspěšná přihlášení na jeden 
 LIM_TTS = Limiter(3, 400)             # generování hlasu (nové hlášky) z IP – start etapy jich přednačte hodně
 LIM_TTS_ALL = Limiter(6, 60)          # generování hlasu celkem
 LIM_SAVE = Limiter(1, 10)             # ukládání postupu na účet
+LIM_WS = Limiter(1 / 2, 10)           # nová WebSocket spojení (záložní přenos MP) z IP
+LIM_ICE = Limiter(1 / 5, 6)           # seznam STUN/TURN serverů pro multiplayer
+LIM_TURNUSE = Limiter(1 / 20, 3)      # hlášení spotřeby TURN z IP
 LIM_MP = Limiter(1 / 15, 4)           # výsledky multiplayeru na účet
 run_seen = {}                         # (účet, id jízdy) -> čas prvního hlášení – kontrola nereálné vzdálenosti
 
@@ -179,7 +282,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options', 'SAMEORIGIN')
         self.send_header('Referrer-Policy', 'no-referrer')
         self.send_header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
-        self.send_header('Content-Security-Policy', CSP)
+        host = self.headers.get('Host', '') if self.headers else ''
+        ws = (' ws://%s wss://%s' % (host, host)) if HOST_RE.match(host) else ''   # WebSocket na vlastní server (Safari nebere 'self' pro ws)
+        self.send_header('Content-Security-Policy', CSP.replace("connect-src 'self'", "connect-src 'self'" + ws))
         super().end_headers()
 
     def send_error(self, code, message=None, explain=None):
@@ -224,6 +329,15 @@ class Handler(BaseHTTPRequestHandler):
             return self.leaderboard()
         if p == '/api/tts':
             return self.tts()
+        if p == '/ws':   # záložní přenos pro multiplayer
+            if not LIM_WS.allow(self.ip()):
+                return self.send_error(429)
+            q = urllib.parse.parse_qs(self.path.split('?', 1)[1] if '?' in self.path else '')
+            return wsrelay.serve(self, (q.get('room') or [''])[0], (q.get('role') or [''])[0])
+        if p == '/api/ice':
+            if not LIM_ICE.allow(self.ip()):
+                return self.reply(429, {'error': 'Moc požadavků, zpomal'})
+            return self.reply(200, {'iceServers': ice_servers()})
         if p.startswith('/api/'):
             return self.send_error(404)
         return self.static_file(False)
@@ -240,6 +354,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def turnuse(self, d, ip):
+        if not LIM_TURNUSE.allow(ip):
+            return self.reply(429, {'error': 'Moc požadavků'})
+        b = d.get('b')
+        if not isinstance(b, (int, float)) or b != b or b < 0:
+            return self.reply(400, {'error': 'Špatný požadavek'})
+        turn_add(min(float(b), 200e6))   # jedno hlášení max 200 MB (za ~minutu hry je to pár MB)
+        return self.reply(200, {'ok': True, 'turn': turn_allowed()})
 
     def leaderboard(self):
         with lock:
@@ -271,6 +394,8 @@ class Handler(BaseHTTPRequestHandler):
         except (ValueError, OSError):
             return self.reply(400, {'error': 'Špatný požadavek'})
         with lock:
+            if p == '/api/turnuse':  # kolik dat šlo přes TURN (hlídání bezplatného limitu)
+                return self.turnuse(d, ip)
             if p == '/api/register':
                 return self.register(d, ip)
             if p == '/api/login':

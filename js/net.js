@@ -3,6 +3,16 @@
 const RACE_KM = 10, MAX_PLAYERS = 4;
 const SLOT_COL = ['#ffcf86', '#ff8a6a', '#8fe38a', '#8ac8ff'];
 const SLOT_PAINT = [0x4f7f86, 0xb04030, 0x3a7a3a, 0x6a4a9a];
+// Záložní spojení přes náš server (WebSocket) – stejné rozhraní jako PeerJS DataConnection (on/send/close/open)
+class RelayConn {
+  constructor(send, close) { this.h = {}; this.open = false; this.relay = true; this._send = send; this._close = close; this._closed = false; }
+  on(ev, fn) { (this.h[ev] = this.h[ev] || []).push(fn); return this; }
+  emit(ev, a) { for (const f of this.h[ev] || []) try { f(a); } catch (e) { console.error(e); } }
+  send(d) { if (this.open) this._send(d); }
+  up() { if (this._closed || this.open) return; this.open = true; this.emit('open'); }
+  down() { if (this._closed) return; this._closed = true; const was = this.open; this.open = false; if (was) this.emit('close'); }
+  close() { if (this._closed) return; this._close(); this.down(); }
+}
 const Net = {
   active: false, isHost: false, peer: null, conn: null, conns: [], code: '', slot: 0, players: {}, mode: 'desert',
   sendT: 0, raceOver: false, inRace: false, ui: () => {}, onLobby: () => {},
@@ -15,6 +25,102 @@ const Net = {
       s.onload = () => res(); s.onerror = () => rej(new Error('Knihovnu PeerJS se nepodařilo načíst (jsi online?)'));
       document.head.appendChild(s);
     });
+  },
+  // STUN/TURN servery: server je zná z nastavení hostingu (TURN = záložní přenos, když přímé spojení nejde)
+  async ice() {
+    if (this._ice && performance.now() - this._iceT < 12e5) return this._ice;   // TURN údaje platí jen pár hodin
+    let list = [{ urls: ['stun:stun.l.google.com:19302', 'stun:stun.cloudflare.com:3478'] }];
+    try {
+      const ac = new AbortController(), tm = setTimeout(() => ac.abort(), 4000);
+      const r = await fetch('/api/ice', { signal: ac.signal }); clearTimeout(tm);
+      if (r.ok) { const d = await r.json(); if (Array.isArray(d.iceServers) && d.iceServers.length) list = d.iceServers; }
+    } catch (e) { /* jen STUN */ }
+    this.hasTurn = list.some(s => [].concat(s.urls).some(u => /^turns?:/.test(u)));
+    this._iceT = performance.now();
+    return (this._ice = list);
+  },
+  peerOpt(ice) { return { config: { iceServers: ice }, debug: 0 }; },
+  canRelay() { return /^https?:$/.test(location.protocol) && 'WebSocket' in window; },
+  wsUrl(role, code) { return (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?room=' + encodeURIComponent(code) + '&role=' + role; },
+  wsSend(ws, o) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(o)); },
+  wsPing(ws) { const iv = setInterval(() => { if (ws.readyState > 1) clearInterval(iv); else this.wsSend(ws, { t: 'p' }); }, 15000); },
+  showCode() { this.ui(`Kód lobby: <b style="font-size:26px;color:#ffcf86">${this.code}</b> – pošli ho kámošům (max ${MAX_PLAYERS} hráči).`); this.onLobby(); },
+  // hostitel: místnost i na serveru, aby se šlo připojit, i když přímé spojení nejde
+  hostRelay() {
+    if (!this.canRelay()) return;
+    let ws; try { ws = new WebSocket(this.wsUrl('host', this.code)); } catch (e) { return; }
+    this.hws = ws; const map = {};
+    ws.onopen = () => this.wsPing(ws);
+    ws.onmessage = (ev) => {
+      if (this.hws !== ws) return;
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (!m || typeof m !== 'object') return;
+      if (m.t === 'h') { if (!this.relayOk) { this.relayOk = true; if (!this.peerOk) this.showCode(); } }
+      else if (m.t === 'j' && Number.isInteger(m.c)) {
+        const id = m.c, c = new RelayConn((d) => this.wsSend(ws, { c: id, d }), () => this.wsSend(ws, { t: 'k', c: id }));
+        map[id] = c; this.accept(c); setTimeout(() => c.up(), 0);
+      } else if (m.t === 'm') { const c = map[m.c]; if (c && c.open) c.emit('data', m.d); }
+      else if (m.t === 'l') { const c = map[m.c]; delete map[m.c]; if (c) c.down(); }
+    };
+    ws.onclose = () => { for (const k in map) map[k].down(); if (this.hws === ws) this.hws = null; };
+  },
+  // hráč: spojení přes server (když přímé nejde)
+  joinRelay(code) {
+    let ws; try { ws = new WebSocket(this.wsUrl('join', code)); } catch (e) { return this.joinFail(); }
+    this.cws = ws;
+    const c = new RelayConn((d) => this.wsSend(ws, { d }), () => { try { ws.close(); } catch (e) { /* nic */ } });
+    ws.onopen = () => this.wsPing(ws);
+    ws.onmessage = (ev) => {
+      let m; try { m = JSON.parse(ev.data); } catch (e) { return; }
+      if (!m || typeof m !== 'object') return;
+      if (m.t === 'o') c.up();
+      else if (m.t === 'x') { if (this.conn === c) { this.conn = null; c._closed = true; this.joinFail('Lobby s tímhle kódem neexistuje, nebo je plné / právě hraje.'); } }
+      else if ('d' in m) { if (c.open) c.emit('data', m.d); }
+    };
+    ws.onerror = () => { if (this.conn === c && !c.open) { this.conn = null; c._closed = true; this.joinFail(); } };
+    ws.onclose = () => c.down();
+    this.conn = c; this.bindJoin(c);
+  },
+  joinFail(msg) {
+    clearTimeout(this._joinT); clearTimeout(this._relayT);
+    this.reset(); this.players = {}; this.onLobby();
+    this.ui(msg || 'Spojení s hostitelem se nepodařilo navázat. Zkontrolujte kód a zkuste to znovu.', 'bad');
+  },
+  bindJoin(c) {
+    c.on('open', () => {
+      if (this.conn !== c) { try { c.close(); } catch (e) { /* nic */ } return; }
+      clearTimeout(this._joinT); clearTimeout(this._relayT);
+      this.send({ t: 'hi', nick: Game.nick() }); this.ui('Připojeno' + (c.relay ? ' (přes server)' : '') + '! Čeká se, až hostitel spustí hru…', 'good');
+    });
+    c.on('data', (d) => { if (this.conn !== c) return; d = this.clean(d); if (d) this.onData(d); });
+    c.on('close', () => {
+      if (this.conn !== c) return;
+      this.conn = null;
+      if (this.inRace && !this.raceOver) { Game.msg('Hostitel se odpojil – hra skončila', 'bad'); this.hostGone(); }
+      else this.ui('Hostitel lobby zavřel.', 'bad');
+      this.players = {}; this.onLobby();
+    });
+  },
+  // kolik dat jde přes záložní TURN server → server hlídá měsíční limit zdarma
+  turnWatch() {
+    if (this._tw) return;
+    this._tw = setInterval(async () => {
+      if (!this.hasTurn || !this.peer) return;
+      const pcs = (this.isHost ? this.conns : [this.conn]).filter(c => c && c.peerConnection).map(c => c.peerConnection);
+      let add = 0;
+      for (const pc of pcs) {
+        try {
+          const st = await pc.getStats(); let pair = null; const loc = {};
+          st.forEach(r => { if (r.type === 'local-candidate') loc[r.id] = r.candidateType; });
+          st.forEach(r => { if (r.type === 'transport' && r.selectedCandidatePairId) pair = st.get(r.selectedCandidatePairId); });
+          if (!pair) st.forEach(r => { if (r.type === 'candidate-pair' && (r.selected || r.nominated && r.state === 'succeeded')) pair = r; });
+          if (!pair || loc[pair.localCandidateId] !== 'relay') continue;
+          const tot = (pair.bytesSent || 0) + (pair.bytesReceived || 0), prev = pc._pjTurn || 0;
+          pc._pjTurn = tot; add += Math.max(0, tot - prev);
+        } catch (e) { /* nic */ }
+      }
+      if (add > 0) fetch('/api/turnuse', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ b: add }) }).catch(() => {});
+    }, 60000);
   },
   errText(e) {
     return { 'peer-unavailable': 'Lobby s tímhle kódem neexistuje (nebo ho hostitel zavřel)', 'unavailable-id': 'Kód je obsazený, zkus to znovu', network: 'Chyba sítě – jsi online?', 'server-error': 'Párovací server neodpovídá, zkus to za chvíli' }[e.type] || ('Chyba spojení: ' + e.type);
@@ -35,21 +141,26 @@ const Net = {
     }
     return o;
   },
-  connected() { return this.isHost ? !!this.peer : !!(this.conn && this.conn.open); },
+  connected() { return this.isHost ? !!(this.peer || this.hws) : !!(this.conn && this.conn.open); },
   others() { return Object.values(this.players).filter(p => p.slot !== this.slot).sort((a, b) => a.slot - b.slot); },
   list() { return Object.values(this.players).sort((a, b) => a.slot - b.slot).map(p => ({ slot: p.slot, nick: p.nick })); },
   nickOf(slot) { const p = this.players[slot]; return p ? p.nick : 'Hráč ' + (slot + 1); },
 
   async host() {
-    try { await this.loadLib(); } catch (e) { return this.ui(e.message, 'bad'); }
-    this.reset(); this.isHost = true; this.slot = 0;
+    let lib = true; try { await this.loadLib(); } catch (e) { lib = false; if (!this.canRelay()) return this.ui(e.message, 'bad'); }
+    const ice = lib ? await this.ice() : null;
+    this.reset(); this.isHost = true; this.slot = 0; this.peerOk = this.relayOk = false;
     this.code = String(1000 + Math.floor(Math.random() * 9000));
     this.players = { 0: { slot: 0, nick: Game.nick() } };
-    this.peer = new Peer('pouste-jizda-' + this.code);
     this.ui('Zakládám lobby…');
-    this.peer.on('open', () => { this.ui(`Kód lobby: <b style="font-size:26px;color:#ffcf86">${this.code}</b> – pošli ho kámošům (max ${MAX_PLAYERS} hráči).`); this.onLobby(); });
-    this.peer.on('connection', (c) => this.accept(c));
-    this.peer.on('error', (e) => this.ui(this.errText(e), 'bad'));
+    this.hostRelay();
+    if (lib) {
+      const peer = this.peer = new Peer('pouste-jizda-' + this.code, this.peerOpt(ice)); this.turnWatch();
+      peer.on('open', () => { if (!this.peerOk && !this.relayOk) this.showCode(); this.peerOk = true; });
+      peer.on('connection', (c) => this.accept(c));
+      // bez párovacího serveru PeerJS to pořád jede přes náš server – chybu ukázat jen když nefunguje ani to
+      peer.on('error', (e) => { if (this.peer === peer && !this.relayOk) this.ui(this.errText(e), 'bad'); });
+    }
     this.onLobby();
   },
   accept(c) {
@@ -58,39 +169,56 @@ const Net = {
       c.on('open', () => { c.send({ t: 'full', inRace: this.inRace }); setTimeout(() => c.close(), 400); });
       return;
     }
-    let slot = 1; while (used.has(slot)) slot++;
-    c.slot = slot; this.players[slot] = { slot, nick: 'Hráč ' + (slot + 1) }; this.conns.push(c);
-    c.on('open', () => { c.send({ t: 'welcome', slot, code: this.code }); this.lobbyBroadcast(); });
-    c.on('data', (d) => { d = this.clean(d); if (!d || !d.t || this.HOST_ONLY.has(d.t)) return; d.from = slot; this.relay(d, c); this.onData(d); });
+    let slot = -1; this.conns.push(c);
+    // když se spojení do 20 s neotevře (síť nepustí přímé spojení), zahodit ho – žádný „duch“ v lobby
+    const dead = setTimeout(() => { if (!c.open) { this.conns = this.conns.filter(x => x !== c); try { c.close(); } catch (e) { /* nic */ } } }, 20000);
+    c.on('open', () => {
+      clearTimeout(dead);
+      if (this.inRace || Object.keys(this.players).length >= MAX_PLAYERS) { c.send({ t: 'full', inRace: this.inRace }); setTimeout(() => c.close(), 400); return; }
+      slot = 1; while (this.players[slot]) slot++;   // slot až po otevření – nepovedené pokusy nic neblokují
+      c.slot = slot; this.players[slot] = { slot, nick: 'Hráč ' + (slot + 1) };
+      c.send({ t: 'welcome', slot, code: this.code }); this.lobbyBroadcast();
+    });
+    c.on('data', (d) => { d = this.clean(d); if (!d || !d.t || this.HOST_ONLY.has(d.t) || !this.players[slot]) return; d.from = slot; this.relay(d, c); this.onData(d); });
     c.on('close', () => this.dropPeer(slot, c));
     c.on('error', () => this.dropPeer(slot, c));
   },
   async join(code) {
     code = String(code || '').trim();
     if (!/^\d{4}$/.test(code)) return this.ui('Zadej čtyřmístný kód od kámoše', 'bad');
-    try { await this.loadLib(); } catch (e) { return this.ui(e.message, 'bad'); }
+    let lib = true; try { await this.loadLib(); } catch (e) { lib = false; if (!this.canRelay()) return this.ui(e.message, 'bad'); }
+    const ice = lib ? await this.ice() : null;
     this.reset(); this.isHost = false; this.code = code;
-    this.peer = new Peer();
     this.ui('Připojuju se…');
-    this.peer.on('open', () => {
-      const c = this.conn = this.peer.connect('pouste-jizda-' + code, { reliable: true });
-      c.on('open', () => { this.send({ t: 'hi', nick: Game.nick() }); this.ui('Připojeno! Čeká se, až hostitel spustí hru…', 'good'); });
-      c.on('data', (d) => { d = this.clean(d); if (d) this.onData(d); });
-      c.on('close', () => {
-        this.conn = null;
-        if (this.inRace && !this.raceOver) { Game.msg('Hostitel se odpojil – hra skončila', 'bad'); this.hostGone(); }
-        else this.ui('Hostitel lobby zavřel.', 'bad');
-        this.players = {}; this.onLobby();
-      });
+    clearTimeout(this._joinT); clearTimeout(this._relayT);
+    const sess = this._sess = {};
+    // přímé spojení nejde do 6 s (nebo PeerJS hlásí chybu) → přes náš server
+    const toRelay = () => {
+      if (this._sess !== sess || sess.relay || (this.conn && this.conn.open)) return;
+      if (!this.canRelay()) return this.joinFail(lib ? undefined : 'Knihovnu PeerJS se nepodařilo načíst.');
+      sess.relay = true; clearTimeout(this._relayT);
+      const old = this.conn; this.conn = null; if (old) try { old.close(); } catch (e) { /* nic */ }
+      if (this.peer) { try { this.peer.destroy(); } catch (e) { /* nic */ } this.peer = null; }
+      this.joinRelay(code);
+    };
+    this._joinT = setTimeout(() => { if (this._sess === sess && !(this.conn && this.conn.open)) this.joinFail(); }, 22000);
+    if (!lib) return toRelay();
+    this._relayT = setTimeout(toRelay, 6000);
+    const peer = this.peer = new Peer(this.peerOpt(ice)); this.turnWatch();
+    peer.on('open', () => {
+      if (this.peer !== peer) return;
+      const c = this.conn = peer.connect('pouste-jizda-' + code, { reliable: true });
+      this.bindJoin(c);
     });
-    this.peer.on('error', (e) => this.ui(this.errText(e), 'bad'));
+    peer.on('error', () => { if (this.peer === peer) toRelay(); });
   },
   leave() { this.reset(); this.players = {}; this.code = ''; this.ui(''); this.onLobby(); },
   reset() {
     for (const c of this.conns) try { c.close(); } catch (e) { /* nic */ }
     if (this.conn) try { this.conn.close(); } catch (e) { /* nic */ }
     if (this.peer) this.peer.destroy();
-    this.conn = null; this.conns = []; this.peer = null; this.isHost = false; this.slot = 0;
+    for (const w of [this.hws, this.cws]) if (w) try { w.close(); } catch (e) { /* nic */ }
+    this.conn = null; this.conns = []; this.peer = null; this.isHost = false; this.slot = 0; this.hws = this.cws = null; this.relayOk = this.peerOk = false; this._sess = null;
   },
   send(o) {
     if (o.ts === undefined) o.ts = Math.round(performance.now()) / 1000;   // čas odesílatele → přesná rychlost u příjemce

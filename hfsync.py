@@ -9,7 +9,7 @@ import os, signal, sys, threading, time
 
 REPO = os.environ.get('PJ_HF_DATASET', '').strip()
 TOKEN = os.environ.get('HF_TOKEN', '').strip()
-PATTERNS = ['leaderboard.json', 'saves/*.json']
+PATTERNS = ['leaderboard.json', 'saves/*.json', 'turn_usage.json']   # turn.json (klíče) se NIKDY nezálohuje
 INTERVAL = 120
 
 _lock = threading.Lock()
@@ -25,7 +25,7 @@ def _sig(data_dir):
     out = []
     sd = os.path.join(data_dir, 'saves')
     saves = sorted(f for f in os.listdir(sd) if f.endswith('.json')) if os.path.isdir(sd) else []
-    for rel in ['leaderboard.json'] + ['saves/' + f for f in saves]:
+    for rel in ['leaderboard.json', 'turn_usage.json'] + ['saves/' + f for f in saves]:
         p = os.path.join(data_dir, rel)
         try:
             st = os.stat(p)

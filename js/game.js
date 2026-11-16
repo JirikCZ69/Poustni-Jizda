@@ -257,9 +257,7 @@ const Game = {
     const R = $('race');
     R.className = 'overlay ' + (o.win ? 'win' : 'lose');
     $('raceTitle').textContent = o.title; $('raceText').innerHTML = o.text || '';
-    const medal = ['🥇', '🥈', '🥉', '4.'];
-    $('raceTable').innerHTML = `<tr><th></th>${o.cols.map(c => `<th>${c}</th>`).join('')}</tr>` +
-      o.rows.map((row, i) => `<tr class="${row.me ? 'me' : ''}" style="animation-delay:${0.25 + i * 0.12}s"><td class="pl">${medal[i] || i + 1 + '.'}</td>${row.cells.map((c, k) => `<td${k === 0 && row.col ? ` style="color:${row.col}"` : ''}>${c}</td>`).join('')}</tr>`).join('');
+    this.resTable(o);
     $('raceReward').innerHTML = o.reward || '';
     const bx = $('raceBtns'); bx.innerHTML = '';
     for (const b of o.buttons) { const e = document.createElement('button'); e.className = 'btn' + (b.alt ? ' alt' : ''); e.textContent = b.label; e.onclick = () => { Confetti.stop(); R.style.display = 'none'; b.fn(); }; bx.appendChild(e); }
@@ -267,6 +265,12 @@ const Game = {
     if (document.exitPointerLock) document.exitPointerLock();
     Radio.duck(5);
     if (o.win) { Sfx.fanfare(); Confetti.start(); } else Sfx.sadTrombone();
+  },
+  // tabulka výsledků (jde překreslit, když dojede další hráč)
+  resTable(o) {
+    const medal = ['🥇', '🥈', '🥉', '4.'];
+    $('raceTable').innerHTML = `<tr><th></th>${o.cols.map(c => `<th>${c}</th>`).join('')}</tr>` +
+      o.rows.map((row, i) => `<tr class="${row.me ? 'me' : ''}" style="animation-delay:${0.25 + i * 0.12}s"><td class="pl">${medal[i] || i + 1 + '.'}</td>${row.cells.map((c, k) => `<td${k === 0 && row.col ? ` style="color:${row.col}"` : ''}>${c}</td>`).join('')}</tr>`).join('');
   },
   // ---------- lobby pro multiplayer ----------
   openLobby() { $('lobby').style.display = 'flex'; this.renderLobby(); },
