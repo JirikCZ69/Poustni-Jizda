@@ -55,7 +55,7 @@ const Game = {
   scrap: 0, trunk: [], stage: 0, xpKm: 0, xpStage: 0, holdT: 0, lockT: 0,
   init() {
     // logaritmický hloubkový buffer = žádné blikání ploch (z-fighting) ani na dálku
-    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
+    const r = this.renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true, powerPreference: 'high-performance' });   // notebook se dvěma grafikami → výkonnější
     r.setPixelRatio(1);
     r.setSize(innerWidth, innerHeight);
     r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap; // PCF s poloměrem = měkké okraje bez schodů
@@ -636,18 +636,24 @@ const Game = {
     this.renderer.render(this.scene, this.camera);
     if (this.inCar && this.playing) this.renderMirrors();
   },
-  // automatické rozlišení: když grafika nestíhá (pod ~52 FPS), sníží se rozlišení vykreslování (max. na 55 %),
-  // jakmile je rezerva, pomalu se vrací zpátky. Ve hře se tak netrhá obraz, jen je chvíli o něco méně ostrý.
+  // automatické rozlišení: hlídá opožděné snímky (ty jsou vidět jako škubnutí, i když průměr FPS vypadá dobře).
+  // Cíl je obnovovací frekvence monitoru, nejvýš ale 60 FPS (na 144Hz monitoru se nesnižuje kvůli tomu, že to nedá 144).
+  // Když se opozdí víc než ~4 % snímků, sníží se rozlišení (nejvýš na 50 %); s rezervou se pomalu vrací.
   autoRes(raw) {
     if (!Settings.s.autoRes) { if (this._arK && this._arK !== 1) { this._arK = 1; Settings.apply && Settings.apply(); } return; }
-    if (document.hidden || raw <= 0 || raw > 0.25) return;   // skryté okno / jednorázový zásek se nepočítá
+    if (document.hidden || raw <= 0.002 || raw > 0.25 || !(Rally.active || Drag.active || Air.active || (this.playing && !this.paused))) { this._arS = this._arN = this._arL = 0; return; }   // menu/pauza/zásek při načítání se nepočítá
+    this._arMin = Math.min(this._arMin || 1, raw);
+    const target = Math.max(this._arRef || 1 / 60, 1 / 61);
     this._arS = (this._arS || 0) + raw; this._arN = (this._arN || 0) + 1;
-    if (this._arS < 1.2) return;
-    const avg = this._arS / this._arN; this._arS = this._arN = 0;
+    if (raw > target * 1.45) this._arL = (this._arL || 0) + 1;
+    if (this._arS < 1.5) return;
+    const late = (this._arL || 0) / this._arN, avg = this._arS / this._arN;
+    this._arRef = this._arMin * 1.02; this._arMin = 1;   // obnovovací interval monitoru = nejkratší snímek okna
+    this._arS = this._arN = this._arL = 0;
     let k = this._arK || 1;
     const now = performance.now();
-    if (avg > 1 / 52 && k > 0.56) { k = Math.max(0.55, k - (avg > 1 / 35 ? 0.15 : 0.08)); this._arUp = 0; this._arHold = now + 12000; }   // po snížení chvíli nezvyšovat (nehoupat ostrostí)
-    else if (avg < 1 / 57 && k < 1 && now > (this._arHold || 0)) { if (++this._arUp >= 3) { k = Math.min(1, k + 0.05); this._arUp = 0; } }
+    if (late > 0.04 && k > 0.51) { k = Math.max(0.5, k - (late > 0.3 ? 0.15 : 0.07)); this._arUp = 0; this._arHold = now + 10000; }   // po snížení chvíli nezvyšovat
+    else if (late < 0.005 && avg < target * 1.08 && k < 1 && now > (this._arHold || 0)) { if (++this._arUp >= 3) { k = Math.min(1, k + 0.05); this._arUp = 0; } }
     else this._arUp = 0;
     if (k !== (this._arK || 1)) {
       this._arK = k = Math.round(k * 100) / 100;

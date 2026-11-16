@@ -462,8 +462,9 @@ float dwF(vec2 p) { return dwN(p) * 0.5 + dwN(p * 2.07 + 3.1) * 0.25 + dwN(p * 4
       }
     }
     for (const [k, ch] of this.chunks) {
-      const dx = ch.cx - ccx, dz = ch.cz - ccz;
-      if (dx * dx + dz * dz > (R + 2) * (R + 2)) this.disposeChunk(k, ch);
+      const dx = ch.cx - ccx, dz = ch.cz - ccz, d2 = dx * dx + dz * dz;
+      if (d2 > (R + 2) * (R + 2)) { this.disposeChunk(k, ch); continue; }
+      const sm = ch.group.userData.small; if (sm) sm.visible = d2 <= 5;   // tráva a drobnosti jen do ~150 m
     }
   },
 };

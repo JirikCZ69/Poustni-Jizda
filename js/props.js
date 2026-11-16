@@ -235,7 +235,8 @@ const Props = (() => {
   }
 
   function* populateChunk(world, cx, cz, group, cols, floors) {
-    const m = new U.Merger(), r = U.rng(Math.floor(U.hash(cx, cz, world.seed) * 1e9));
+    // drobnosti (tráva, kytky, oblázky…) zvlášť: nevrhají stín a zdálky se nekreslí – měly většinu trojúhelníků v okolí
+    const m = new U.Merger(), sm = new U.Merger(), r = U.rng(Math.floor(U.hash(cx, cz, world.seed) * 1e9));
     const x0 = cx * W_CHUNK, z0 = cz * W_CHUNK;
     const bw = world.biomeW(z0 + W_CHUNK / 2);
     const bio = BIOMES[r() < bw.t ? bw.b : bw.a];
@@ -252,13 +253,13 @@ const Props = (() => {
           case 'cactus': N.cactus(m, cols, x, y, z, r); break;
           case 'barrel': N.barrel(m, cols, x, y, z, r); break;
           case 'yucca': N.yucca(m, cols, x, y, z, r); break;
-          case 'agave': N.agave(m, x, y, z, r); break;
+          case 'agave': N.agave(sm, x, y, z, r); break;
           case 'ocotillo': N.ocotillo(m, cols, x, y, z, r); break;
-          case 'flowers': N.flowers(m, x, y, z, r, FLOWERS[b.name]); break;
-          case 'grass': N.grass(m, x, y, z, r); break;
-          case 'drygrass': N.grass(m, x, y, z, r, 0xd2c08e); break;
-          case 'pebbles': N.pebbles(m, x, y, z, r, b); break;
-          case 'bones': N.bones(m, x, y, z, r); break;
+          case 'flowers': N.flowers(sm, x, y, z, r, FLOWERS[b.name]); break;
+          case 'grass': N.grass(sm, x, y, z, r); break;
+          case 'drygrass': N.grass(sm, x, y, z, r, 0xd2c08e); break;
+          case 'pebbles': N.pebbles(sm, x, y, z, r, b); break;
+          case 'bones': N.bones(sm, x, y, z, r); break;
           case 'rock': N.rock(m, cols, x, y, z, r, b, false); break;
           case 'boulder': N.rock(m, cols, x, y, z, r, b, true); break;
           case 'outcrop': N.outcrop(m, cols, x, y, z, r, b); break;
@@ -269,7 +270,7 @@ const Props = (() => {
           case 'log': N.log(m, cols, x, y, z, r); break;
           case 'mesa': N.mesa(m, cols, x, y, z, r, b); break;
           case 'saltmound': N.saltmound(m, x, y, z, r); break;
-          case 'saltplate': N.saltplate(m, x, y, z, r); break;
+          case 'saltplate': N.saltplate(sm, x, y, z, r); break;
         }
         if (i % 6 === 5) yield;
       }
@@ -306,6 +307,8 @@ const Props = (() => {
     for (const h of world.houseGrid.get(k) || []) { Buildings.build(world, h, group, cols, floors); yield; }
     const mesh = m.build();
     if (mesh) group.add(mesh);
+    const small = sm.build();
+    if (small) { small.castShadow = false; group.add(small); group.userData.small = small; }
   }
 
   return { populateChunk, junkyard, T };
