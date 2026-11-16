@@ -281,19 +281,21 @@ const Game = {
       const pl = Object.values(Net.players).sort((a, b) => a.slot - b.slot);
       h += '<div class="lbSlots">' + [0, 1, 2, 3].map(i => { const p = pl[i]; return p ? `<div class="lbSlot" style="border-color:${SLOT_COL[p.slot]}"><b style="color:${SLOT_COL[p.slot]}">${esc(p.nick)}</b>${p.slot === 0 ? ' 👑' : ''}${p.slot === Net.slot ? ' (ty)' : ''}</div>` : '<div class="lbSlot empty">volné místo…</div>'; }).join('') + '</div>';
       const modes = [['desert', '🏜 Pouštní závod', `${RACE_KM} km pouští, každý si poskládá svoje auto. Smrt = minuta penalizace.`], ['drag', '🏁 Drag race', 'Čtvrt míle rovně, každý se svým autem z drag garáže. Vítěz bere nejvíc peněz a XP.'], ['dragsb', '🧪 Drag sandbox', 'Každý si navolí cokoliv – 25× výkon, Měsíc, rakety. Bez odměn, jen kraviny.']];
-      const rm = String(Net.mode).startsWith('rally'), rp = String(Net.mode).split(':'), rs = rp[2] === 's', myRs = ((Rally.sv || U.store.get('pj_rally', {})).stage) || 0, ri = rm ? +rp[1] || 0 : myRs;
+      const rm = String(Net.mode).startsWith('rally'), rf = String(Net.mode).startsWith('rallyf'), rp = String(Net.mode).split(':'), rs = rp[2] === 's', myRs = ((Rally.sv || U.store.get('pj_rally', {})).stage) || 0, ri = rm ? +rp[1] || 0 : myRs;
       modes.push(['rally:' + ri + (rs ? ':s' : ''), '🗺 Rally (koop)', 'Dvojice = řidič + spolujezdec s tabletem. Spolujezdec hlásí zatáčky, řidič jede podle něj.']);
+      modes.push(['rallyf:' + ri, '🏆 Rally – každý sám', 'Každý řídí svoje auto z rally servisu, hlásí mu AI spolujezdec. Nejrychlejší čas vyhrává.']);
       const am = String(Net.mode).startsWith('air'), ati = am ? U.clamp(+String(Net.mode).split(':')[1] || 0, 0, AIR_TRACKS.length - 1) : ((Air.sv || U.store.get('pj_air', {})).track || 0);
       modes.push(['air:' + ati, '✈ Letecký závod', 'Každý si vybere letadlo v hangáru. Letmý start, brány a pylony, 2 kola.']);
       const dis = Net.isHost ? '' : 'disabled';
-      h += '<h3>Režim</h3><div class="lbModes">' + modes.map(([id, n, d]) => `<button class="lbMode${Net.mode === id || (rm && id.startsWith('rally')) || (am && id.startsWith('air')) ? ' on' : ''}" data-lb="mode:${id}" ${dis}><b>${n}</b><br><span>${d}</span></button>`).join('') + '</div>';
+      h += '<h3>Režim</h3><div class="lbModes">' + modes.map(([id, n, d]) => `<button class="lbMode${Net.mode === id || (rm && id.startsWith(rf ? 'rallyf' : 'rally:')) || (am && id.startsWith('air')) ? ' on' : ''}" data-lb="mode:${id}" ${dis}><b>${n}</b><br><span>${d}</span></button>`).join('') + '</div>';
       if (am) h += '<h3>Trať</h3><div class="lbModes">' + AIR_TRACKS.map((t, i) => `<button class="lbMode${i === ati ? ' on' : ''}" data-lb="mode:air:${i}" ${dis}><b>${t.name}</b><br><span>${t.gates} bran · ${t.laps} kola</span></button>`).join('') + '</div><div style="margin-top:6px;opacity:.8;font-size:13px">Letadlo si každý vybírá v ✈ hangáru (hlavní menu → Letecké závody).</div>';
       if (rm) {
         const sl = Object.values(Net.players).map(p => p.slot).sort((a, b) => a - b), pairs = [];
-        for (let i = 0; i < sl.length; i += 2) { const pr = sl.slice(i, i + 2), dr = rs && pr.length === 2 ? pr[1] : pr[0]; pairs.push(`🚗 <b>${esc(Net.nickOf(dr))}</b> řídí${pr.length === 2 ? ` · 📋 <b>${esc(Net.nickOf(pr.find(x => x !== dr)))}</b> spolujezdec` : ' · 📋 AI spolujezdec'}`); }
+        if (rf) for (const s of sl) pairs.push(`🚗 <b style="color:${SLOT_COL[s]}">${esc(Net.nickOf(s))}</b> · 📋 AI spolujezdec`);
+        else for (let i = 0; i < sl.length; i += 2) { const pr = sl.slice(i, i + 2), dr = rs && pr.length === 2 ? pr[1] : pr[0]; pairs.push(`🚗 <b>${esc(Net.nickOf(dr))}</b> řídí${pr.length === 2 ? ` · 📋 <b>${esc(Net.nickOf(pr.find(x => x !== dr)))}</b> spolujezdec` : ' · 📋 AI spolujezdec'}`); }
         const rst = rallyStage(ri);
         h += `<h3>Etapa ${ri + 1}</h3><div class="lbModes"><div class="lbMode on"><b>${esc(rst.name)}</b> · ${RALLY_BIOMES[rst.biome].name}<br><span>${(rst.len / 1000).toFixed(1)} km · ${Object.keys(rst.mix).map(k => RALLY_SURF[k].name).join(', ')} · etapa podle postupu hostitele, po dojetí jede další</span></div></div>`;
-        h += `<div style="margin-top:8px;text-align:left">${pairs.join('<br>')}</div><button class="btn alt" style="margin-top:6px" data-lb="mode:rally:${ri}${rs ? '' : ':s'}" ${dis}>🔄 Prohodit řidiče a spolujezdce</button>`;
+        h += `<div style="margin-top:8px;text-align:left">${pairs.join('<br>')}</div>${rf ? '' : `<button class="btn alt" style="margin-top:6px" data-lb="mode:rally:${ri}${rs ? '' : ':s'}" ${dis}>🔄 Prohodit řidiče a spolujezdce</button>`}`;
       }
       h += '<div style="margin-top:12px">' + (Net.isHost ? `<button class="btn" data-lb="start" ${Net.others().length ? '' : 'disabled'}>SPUSTIT${Net.others().length ? '' : ' (čeká se na hráče)'}</button>` : '<span style="opacity:.8">Čeká se, až hostitel spustí hru…</span>') + ' <button class="btn alt" data-lb="leave">Odejít z lobby</button></div>';
     }

@@ -316,15 +316,17 @@ const Rally = {
     this.load();
     if (!this.gScene) this.buildGarage();
     const parts = String(mode).split(':'), idx = U.clamp(+parts[1] || 0, 0, 999), swap = parts[2] === 's';
-    const order = slots.slice().sort((a, b) => a - b), teams = [];
-    for (let i = 0; i < order.length; i += 2) {
+    const order = slots.slice().sort((a, b) => a - b), teams = [], ffa = parts[0] === 'rallyf';
+    // každý sám za sebe: každý hráč má svoje auto s AI spolujezdcem a závodí proti ostatním
+    if (ffa) for (const sl of order) teams.push({ id: teams.length, driver: sl, co: -1, nick: Net.nickOf(sl), crew: Net.nickOf(sl), col: SLOT_COL[sl] });
+    else for (let i = 0; i < order.length; i += 2) {
       const pair = order.slice(i, i + 2), drv = swap && pair.length === 2 ? pair[1] : pair[0], co = pair.length === 2 ? (drv === pair[0] ? pair[1] : pair[0]) : -1;
       teams.push({ id: teams.length, driver: drv, co, nick: Net.nickOf(drv), crew: Net.nickOf(drv) + (co >= 0 ? ' + ' + Net.nickOf(co) : ' + AI') });
     }
     const mt = teams.find(t => t.driver === Net.slot || t.co === Net.slot);
     for (const t of teams) { t.mine = t === mt; if (t.driver === Net.slot) { t.stats = this.stats(); t.look = this.look(); } else t.look = { paint: SLOT_PAINT[t.driver] || 0x888888, cosm: {}, ex: { num: true }, num: t.driver + 1 }; }
     $('menu').style.display = 'none'; $('lobby').style.display = 'none';
-    this.setup({ idx, net: true, teams, myTeam: mt.id, role: mt.driver === Net.slot ? 'driver' : 'codriver' });
+    this.setup({ idx, net: true, ffa, teams, myTeam: mt.id, role: mt.driver === Net.slot ? 'driver' : 'codriver' });
     if (this.role === 'driver') Net.send({ t: 'rcar', team: mt.id, look: mt.look });
     for (const d of this.pending || []) this.onNet(d);
     this.pending = [];
@@ -1206,7 +1208,7 @@ const Rally = {
         : `<b>${K('forward')}/${K('back')}</b> plyn/brzda · <b>${K('left')}/${K('right')}</b> řízení · <b>${K('handbrake')}</b> ručka · ${c && !c.s.auto ? `<b>${K('shiftUp')}/${K('shiftDown')}</b> řazení · ` : ''}<b>${K('gearmode')}</b> automat · <b>${K('camera')}</b> kamera · <b>X</b> na trať (+5 s) · <b>myš</b> rozhlížení · <b>Esc</b> vzdát`;
       const ke = $('rhKeys'); if (ke._h !== kh) { ke._h = kh; ke.innerHTML = kh; }
       // ostatní posádky
-      const th = this.ais ? this.aiBoard() : this.teams.length > 1 ? this.teams.map(t => `<div style="color:${RALLY_TEAM_COL[t.id % 2]}">${t.mine ? '▶ ' : ''}${String(t.crew).replace(/[<>&]/g, '')} <b>${t.res ? (t.res.dnf ? 'DNF' : this.fmt(t.res.time)) : Math.round((t.pose.s || 0) / tr.len * 100) + ' %'}</b></div>`).join('') : '';
+      const th = this.ais ? this.aiBoard() : this.teams.length > 1 ? this.teams.map(t => `<div style="color:${t.col || RALLY_TEAM_COL[t.id % 2]}">${t.mine ? '▶ ' : ''}${String(t.crew).replace(/[<>&]/g, '')} <b>${t.res ? (t.res.dnf ? 'DNF' : this.fmt(t.res.time)) : Math.round((t.pose.s || 0) / tr.len * 100) + ' %'}</b></div>`).join('') : '';
       const te = $('rhTeams'); if (te._h !== th) { te._h = th; te.innerHTML = th; }
     }
   },
@@ -1243,7 +1245,7 @@ const Rally = {
       g.fillStyle = 'rgba(0,0,0,.7)'; g.fillRect(x + 9, y - 11, tw, 22); g.fillStyle = col; g.textAlign = 'left'; g.fillText(lab, x + 14, y + 1); g.textAlign = 'center';
     }
     // ostatní posádky
-    for (const t of this.teams) if (!t.mine) { const [x, y] = toS(t.pose.x, t.pose.z); g.fillStyle = RALLY_TEAM_COL[t.id % 2]; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); }
+    for (const t of this.teams) if (!t.mine) { const [x, y] = toS(t.pose.x, t.pose.z); g.fillStyle = t.col || RALLY_TEAM_COL[t.id % 2]; g.beginPath(); g.arc(x, y, 6, 0, 7); g.fill(); }
     g.fillStyle = '#ffcf3a'; g.beginPath(); g.moveTo(mx, my - 14); g.lineTo(mx - 9, my + 9); g.lineTo(mx + 9, my + 9); g.closePath(); g.fill();
     g.restore();
     // přehled celé trati
@@ -1286,11 +1288,11 @@ const Rally = {
   },
   results() {
     const me = this.my, sv = this.sv, stage = this.cur.stage, tr = this.cur.tr, res = me.res;
-    const ai = !!this.ais;
+    const ai = !!this.ais, ffa = !!this.opt.ffa;
     const ranked = ai ? this.aiRanked() : this.teams.slice().sort((a, b) => (a.res.dnf ? 1 : 0) - (b.res.dnf ? 1 : 0) || (a.res.time || 1e9) - (b.res.time || 1e9));
     const multi = this.teams.length > 1, won = !res.dnf && ranked[0] === me;
     const medal = res.dnf ? 0 : this.medal(stage, res.time, tr.par);
-    const pos = ai ? ranked.indexOf(me) + 1 : 0, posK = ai && !res.dnf ? [1.5, 1.3, 1.15][pos - 1] || 1 : 1;   // bonus za umístění v závodě s AI
+    const pos = ai || ffa ? ranked.indexOf(me) + 1 : 0, posK = (ai || ffa) && !res.dnf ? [1.5, 1.3, 1.15][pos - 1] || 1 : 1;   // bonus za umístění v závodě s AI
     let money = 0, xp;
     if (!res.dnf) money = Math.round(stage.reward * [1, 1.1, 1.25, 1.5][medal] * (multi && won ? 1.25 : 1) * posK);
     xp = Math.round(stage.xp * (res.dnf ? 0.3 : [1, 1.1, 1.25, 1.5][medal]) * (multi && won ? 1.25 : 1) * posK);
@@ -1317,9 +1319,9 @@ const Rally = {
     if (multi) Account.mp(won);
     const mName = ['bez medaile', 'bronz 🥉', 'stříbro 🥈', 'zlato 🥇'][medal];
     let txt = res.dnf ? `Nedojeli jste – ${res.why || 'DNF'}.` : `Čas ${this.fmt(res.time)} · ${mName} (zlato pod ${this.fmt(tr.par * 1.06)}).${pbTxt}`;
-    if (multi) txt = (won ? 'Vaše posádka vyhrála! ' : res.dnf ? '' : 'Druhá posádka byla rychlejší. ') + txt;
-    if (ai && !res.dnf) txt = `Dojel jsi ${pos}. z ${ranked.length}!${posK > 1 ? ` Bonus za umístění ×${posK}.` : ''} ` + txt;
-    const rows = ranked.map((t, i) => ({ me: t.mine, col: t.col || RALLY_TEAM_COL[t.id % 2], cells: [(ai ? i + 1 + '. ' : '') + String(t.crew).replace(/[<>&]/g, ''), t.res.dnf ? (t.res.left ? 'odpojen' : 'DNF') : (t.res.est ? '~' : '') + this.fmt(t.res.time), t.res.dnf || !ranked[0].res.time ? '—' : '+' + (t.res.time - ranked[0].res.time).toFixed(2), t.res.dmg !== undefined ? t.res.dmg.toLocaleString('cs-CZ') + ' Kč' : '—'] }));
+    if (multi && !ffa) txt = (won ? 'Vaše posádka vyhrála! ' : res.dnf ? '' : 'Druhá posádka byla rychlejší. ') + txt;
+    if ((ai || ffa) && !res.dnf) txt = `Dojel jsi ${pos}. z ${ranked.length}!${posK > 1 ? ` Bonus za umístění ×${posK}.` : ''} ` + txt;
+    const rows = ranked.map((t, i) => ({ me: t.mine, col: t.col || RALLY_TEAM_COL[t.id % 2], cells: [(ai || ffa ? i + 1 + '. ' : '') + String(t.crew).replace(/[<>&]/g, ''), t.res.dnf ? (t.res.left ? 'odpojen' : 'DNF') : (t.res.est ? '~' : '') + this.fmt(t.res.time), t.res.dnf || !ranked[0].res.time ? '—' : '+' + (t.res.time - ranked[0].res.time).toFixed(2), t.res.dmg !== undefined ? t.res.dmg.toLocaleString('cs-CZ') + ' Kč' : '—'] }));
     let rew = `<div class="rwd"><span>💰 +${money.toLocaleString('cs-CZ')} Kč</span><span>🔧 oprava −${repair.toLocaleString('cs-CZ')} Kč</span><span>⭐ +${xp} XP</span></div>`;
     rew += `<div style="margin-top:4px;font-weight:700;color:${coneOk ? '#8fff9a' : '#ffb347'}">🔶 Zaklepat 20 kuželů: ${this.cones}/${RALLY_CONE_GOAL} – ${coneOk ? `splněno! +${coneBonus.toLocaleString('cs-CZ')} Kč, +60 XP` : res.dnf ? 'nedojeli jste' : `chybělo ${RALLY_CONE_GOAL - this.cones}, úkol nesplněn`}</div>`;
     rew += `<div style="opacity:.85;margin-top:4px">Celkem ${net >= 0 ? '+' : ''}${net.toLocaleString('cs-CZ')} Kč${clean ? ' · bonus za čistou jízdu' : ''}</div>`;
@@ -1328,7 +1330,7 @@ const Rally = {
     const nx = rallyStage(sv.stage || 0);
     if (advanced) rew += `<div class="lvlup">Odemčena etapa ${nx.name}${nx.name.includes(RALLY_BIOMES[nx.biome].name) ? '' : ' (' + RALLY_BIOMES[nx.biome].name.toLowerCase() + ')'} – zase o kus těžší!</div>`;
     if (this.opt.net) {
-      if (Net.isHost) btns.push(res.dnf ? { label: '🔁 Znovu', fn: () => Net.start() } : { label: '🏁 Další etapa', fn: () => { Net.mode = 'rally:' + (sv.stage || 0) + (String(Net.mode).endsWith(':s') ? ':s' : ''); Net.setMode && Net.setMode(Net.mode); Net.start(); } });
+      if (Net.isHost) btns.push(res.dnf ? { label: '🔁 Znovu', fn: () => Net.start() } : { label: '🏁 Další etapa', fn: () => { Net.mode = (ffa ? 'rallyf:' : 'rally:') + (sv.stage || 0) + (String(Net.mode).endsWith(':s') ? ':s' : ''); Net.setMode && Net.setMode(Net.mode); Net.start(); } });
       else rew += '<div style="opacity:.8;margin-top:6px">Hostitel může spustit další etapu.</div>';
     } else if (res.dnf) btns.push({ label: '🔁 Zkusit znovu', fn: () => this.startSolo(this.opt.idx, ai) });
     else {
@@ -1337,7 +1339,7 @@ const Rally = {
     }
     btns.push({ label: '🔧 Do servisu', alt: true, fn: () => { this.exit(); this.enterGarage(); } });
     this.say(null);
-    Game.showResults({ win: ai ? !res.dnf && pos <= 3 : !res.dnf && (!multi || won) && medal > 0, title: res.dnf ? 'NEDOJELI JSTE' : ai ? (pos === 1 ? 'VYHRÁL JSI!' : `${pos}. MÍSTO`) : multi ? (won ? 'VYHRÁLI JSTE!' : 'DRUZÍ') : medal ? 'V CÍLI!' : 'DOJELI JSTE', text: txt, cols: ['Posádka', 'Čas', 'Ztráta', 'Oprava'], rows, reward: rew, buttons: btns });
+    Game.showResults({ win: ai ? !res.dnf && pos <= 3 : ffa ? !res.dnf && pos === 1 : !res.dnf && (!multi || won) && medal > 0, title: res.dnf ? 'NEDOJELI JSTE' : ai || ffa ? (pos === 1 ? 'VYHRÁL JSI!' : `${pos}. MÍSTO`) : multi ? (won ? 'VYHRÁLI JSTE!' : 'DRUZÍ') : medal ? 'V CÍLI!' : 'DOJELI JSTE', text: txt, cols: ['Posádka', 'Čas', 'Ztráta', 'Oprava'], rows, reward: rew, buttons: btns });
   },
 
   // ---------- síť ----------
