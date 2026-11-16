@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: pouste-jizda
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PJ_HF_DATASET
+        value: JirikCZ/pouste-jizda-data
+      - key: HF_TOKEN
+        sync: false
