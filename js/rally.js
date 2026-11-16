@@ -470,14 +470,15 @@ const Rally = {
     Sfx.tone(1180, 0.06, 0.08, 'sine');
     if (voice === false || !this.sv.tts) return;
     const clean = this.speechText(txt);
-    this._sayEnd = performance.now() / 1000 + 0.4 + clean.length * 0.062;   // odhad délky věty (aby ji další pokyn neusekl)
+    this._sayEnd = performance.now() / 1000 + 0.25 + clean.length * 0.11;   // odhad délky věty (aby ji další pokyn neusekl)
     try {
       // spolujezdec je chlap: 1) mužský český hlas prohlížeče, 2) hlas ze serveru převedený na mužský (interkom v helmě),
       // 3) ženský český hlas prohlížeče posazený níž, 4) online hlas napřímo (níž). Anglicky nikdy.
       const v = window.speechSynthesis ? this.czVoice() : null;
       if (v && this.isMale(v)) return this.browserSpeak(v, clean, 1);
       if (this._srvTts !== false && Sfx.ctx) {
-        this.srvSpeak(clean).catch(() => { this._srvTts = false; if (v) this.browserSpeak(v, clean, 0.45); else this.netSpeak(clean); });
+        this._srvFail = this._srvFail || 0;   // hlas ze serveru se vypne až po několika chybách (jedna pomalá hláška ho nezabije)
+        this.srvSpeak(clean).catch(() => { if (++this._srvFail >= 3) this._srvTts = false; if (v) this.browserSpeak(v, clean, 0.45); else this.netSpeak(clean); });
         return;
       }
       if (v) return this.browserSpeak(v, clean, 0.45);
@@ -499,6 +500,7 @@ const Rally = {
     const v = await this.voiceLoad(txt);
     if (id !== this._vId) return;   // mezitím přišel novější pokyn
     this.stopVoice();
+    this._sayEnd = performance.now() / 1000 + v.buf.duration / (v.male ? 1 : this.VOICE_PITCH);   // skutečná délka věty
     const src = ctx.createBufferSource(); src.buffer = v.buf; src.playbackRate.value = v.male ? 1 : this.VOICE_PITCH;   // skutečný hlas bez přelaďování = nejsrozumitelnější
     // srozumitelnost: ořezat dunění, zvýraznit souhlásky (2–4 kHz), srovnat hlasitost
     const hp = ctx.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.value = 110;
@@ -512,22 +514,49 @@ const Rally = {
     src.onended = () => { if (this._vSrc === src) { this._vSrc = null; Sfx.ducking && Sfx.ducking(false); } };
     src.start(); this._vSrc = src;
   },
-  // načtení hlášky ze serveru (sdílený příslib → přednačtení a přehrání se nepoperou)
+  // načtení hlášky ze serveru: věta se skládá z kousků („Levá 3 dlouhá“ · „utahuje se“ · „150“), které má server
+  // namluvené předem → hláška je hned, i když je server slabý. Kousky se slepí s krátkou pauzou (čárka) / delší (tečka).
   voiceLoad(txt) {
-    const ctx = Sfx.ctx; this._vCache = this._vCache || new Map();
+    this._vCache = this._vCache || new Map();
     let p = this._vCache.get(txt);
     if (!p) {
       p = (async () => {
-        const r = await fetch('/api/tts?q=' + encodeURIComponent(txt));
-        if (!r.ok) throw new Error('tts ' + r.status);
-        const male = r.headers.get('X-Voice') === 'male';   // server má skutečný mužský hlas (Piper) → nic nepřelaďujeme
-        const raw = await ctx.decodeAudioData(await r.arrayBuffer());
+        const parts = [], re = /([^,.]+)([,.]?)/g; let m;
+        while ((m = re.exec(txt))) { const t = m[1].trim(); if (t) parts.push([t, m[2] === '.' ? 0.26 : 0.1]); }
+        if (!parts.length) throw new Error('prázdná hláška');
+        const bufs = await Promise.all(parts.map(([t]) => this.voicePart(t)));
+        const ctx = Sfx.ctx, sr = bufs[0].buf.sampleRate, male = bufs.every(b => b.male);
+        let len = 0; bufs.forEach((b, i) => { len += b.buf.length + (i < bufs.length - 1 ? Math.round(parts[i][1] * sr) : 0); });
+        const out = ctx.createBuffer(1, len, sr), o = out.getChannelData(0);
+        let at = 0; bufs.forEach((b, i) => { o.set(b.buf.getChannelData(0).subarray(0, Math.min(b.buf.length, len - at)), at); at += b.buf.length + Math.round(parts[i][1] * sr); });
         this.voiceKind = male ? 'male' : 'shifted';
-        return { buf: male ? raw : await this.maleVoiceAsync(ctx, raw, this.VOICE_PITCH), male };
+        return { buf: male ? out : await this.maleVoiceAsync(ctx, out, this.VOICE_PITCH), male };
       })();
       p.catch(() => this._vCache.delete(txt));
       if (this._vCache.size > 500) this._vCache.clear();
       this._vCache.set(txt, p);
+    }
+    return p;
+  },
+  voicePart(t) {
+    this._vPart = this._vPart || new Map();
+    let p = this._vPart.get(t);
+    if (!p) {
+      p = (async () => {
+        const r = await fetch('/api/tts?q=' + encodeURIComponent(t));
+        if (!r.ok) throw new Error('tts ' + r.status);
+        const male = r.headers.get('X-Voice') === 'male';   // server má skutečný mužský hlas (Piper) → nic nepřelaďujeme
+        const raw = await Sfx.ctx.decodeAudioData(await r.arrayBuffer());
+        // ticho na začátku/konci kousku ořezat, ať slepená věta nemá díry
+        const d = raw.getChannelData(0), th = 0.03; let a = 0, b = d.length - 1;
+        while (a < b && Math.abs(d[a]) < th) a++; while (b > a && Math.abs(d[b]) < th) b--;
+        a = Math.max(0, a - Math.round(raw.sampleRate * 0.02)); b = Math.min(d.length, b + Math.round(raw.sampleRate * 0.04));
+        const buf = Sfx.ctx.createBuffer(1, Math.max(1, b - a), raw.sampleRate); buf.getChannelData(0).set(d.subarray(a, b));
+        return { buf, male };
+      })();
+      p.catch(() => this._vPart.delete(t));
+      if (this._vPart.size > 400) this._vPart.clear();
+      this._vPart.set(t, p);
     }
     return p;
   },
@@ -623,8 +652,8 @@ const Rally = {
     // spojit jen zatáčky, které na sebe navazují („…, hned“), ne zatáčku o sto metrů dál
     const chain = this.chainLen(notes, this.nc), txt = this.chainTxt(notes, this.nc, chain);
     // kdy hlásit: tak, aby věta skončila ~1 s před nájezdem do zatáčky – delší věta začne dřív, krátká později
-    const talk = 0.4 + this.speechText(txt).length * 0.062;
-    const lead = U.clamp(10 + v * (talk + 1.0), 40, 135);
+    const talk = 0.25 + this.speechText(txt).length * 0.11;   // změřená délka namluvených hlášek (~0,11 s na znak)
+    const lead = U.clamp(10 + v * (talk + 1.0), 40, 160);
     if (dist > lead && !force) return;
     // nepřerušovat rozjetou větu – počkat, dokud to nedořekne (jen když už zatáčka opravdu hoří, skočit do řeči)
     if (now < (this._sayEnd || 0) && dist > 12 + v * 1.1) return;

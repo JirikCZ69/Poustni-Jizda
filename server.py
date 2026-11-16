@@ -19,7 +19,7 @@ DATA_DIR = os.environ.get('PJ_DATA') or os.path.join(ROOT, 'data')
 DB_PATH = os.path.join(DATA_DIR, 'leaderboard.json')
 SAVE_DIR = os.path.join(DATA_DIR, 'saves')     # postup hry každého účtu (rally, drag, perky…)
 TTS_DIR = os.path.join(DATA_DIR, 'tts')        # cache hlášení spolujezdce
-import hfsync                                  # záloha dat do HF datasetu (jen na hostingu)
+import hfsync, ttspiper                                  # záloha dat do HF datasetu (jen na hostingu)
 hfsync.restore(DATA_DIR)
 SAVE_MAX = 600_000
 MAX_USERS = 20_000
@@ -382,6 +382,9 @@ class Handler(BaseHTTPRequestHandler):
         exe, model = piper_paths()
         fn_p = os.path.join(TTS_DIR, 'p3_' + key + '.wav')
         fn_g = os.path.join(TTS_DIR, key + '.mp3')
+        fn_s = os.path.join(ROOT, 'ttsseed', 'p3_' + key + '.wav')   # předem namluvené kousky hlášek (Docker build)
+        if os.path.exists(fn_s):
+            return self.send_audio(fn_s, 'audio/wav', 'male')
         if exe and os.path.exists(fn_p):
             return self.send_audio(fn_p, 'audio/wav', 'male')
         if not exe and os.path.exists(fn_g):
@@ -400,8 +403,10 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 with TTS_LOCK:
                     if not os.path.exists(fn):
-                        subprocess.run([exe, '--model', model, '--output_file', fn + '.tmp', '--length_scale', '1.0', '--noise_scale', '0.5', '--noise_w', '0.6', '--sentence_silence', '0.18'],
-                                       input=q.encode('utf-8'), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=20, check=True)
+                        # trvale běžící piper (model načtený jednou) – jinak jednorázové spuštění
+                        if not ttspiper.synth(exe, model, q, fn + '.tmp'):
+                            subprocess.run([exe, '--model', model, '--output_file', fn + '.tmp', '--length_scale', '0.85', '--noise_scale', '0.5', '--noise_w', '0.6', '--sentence_silence', '0.18'],
+                                           input=q.encode('utf-8'), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60, check=True)
                         os.replace(fn + '.tmp', fn)
             except Exception:
                 fn = None
@@ -507,6 +512,9 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT') or 8765)   # hosting (Railway…) dává port v PORT
     srv = Server(('0.0.0.0', port), Handler)
     hfsync.start()
+    exe, model = piper_paths()
+    if exe:   # model hlasu načíst hned při startu (na slabém hostingu to trvá desítky sekund)
+        threading.Thread(target=lambda: ttspiper.synth(exe, model, 'Start', os.path.join(DATA_DIR, 'warm.wav'), timeout=120), daemon=True).start()
     print(f'Pouštní jízda běží na http://localhost:{port}  (z jiného PC: http://<IP tohoto PC>:{port})')
     try:
         srv.serve_forever()
