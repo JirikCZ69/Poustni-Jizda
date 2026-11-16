@@ -12,7 +12,9 @@ def fragments():
     for d in ('Levá', 'Pravá'):
         for s in range(1, 7):
             out.add(f'{d} {s}'); out.add(f'{d} {s} dlouhá')
-    out.update(['Vlásenka levá', 'Vlásenka pravá', 'utahuje se', 'otevírá', 'hned',
+            if s <= 2:   # po „Brzda,“ s malým písmenem
+                out.add(f'{d.lower()} {s}'); out.add(f'{d.lower()} {s} dlouhá')
+    out.update(['Levý vracák', 'Pravý vracák', 'levý vracák', 'pravý vracák', 'Brzda', 'utahuje se', 'otevírá se', 'hned',
                 'Mírně klikatá', 'naplno', 'Skok Rovně', 'drž stopu', 'Přes horizont', 'Pozor',
                 'asfalt', 'šotolina', 'písek', 'mimo trať', 'Cíl Naplno do cíle', 'Start', 'Jedem'])
     for n in range(50, 2001, 50):

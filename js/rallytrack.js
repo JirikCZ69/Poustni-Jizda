@@ -277,10 +277,10 @@ const RallyTrack = {
       for (let q = ti; q < half; q++) firstMax = Math.max(firstMax, Math.abs(ks[q]));
       for (let q = half; q < j; q++) secondMax = Math.max(secondMax, Math.abs(ks[q]));
       const dirTxt = sg > 0 ? 'Pravá' : 'Levá';
-      let txt = sev === 0 ? `Vlásenka ${sg > 0 ? 'pravá' : 'levá'}` : `${dirTxt} ${sev}`;
+      let txt = sev === 0 ? `${sg > 0 ? 'Pravý' : 'Levý'} vracák` : `${dirTxt} ${sev}`;
       if (len > 90 && sev > 0) txt += ' dlouhá';
       if (secondMax > firstMax * 1.5) txt += ', utahuje se';
-      else if (firstMax > secondMax * 1.5) txt += ', otevírá';
+      else if (firstMax > secondMax * 1.5) txt += ', otevírá se';
       notes.push({ s: P[ti].s, end: P[j].s, dir: sg, sev, txt, kind: 'corner' });
     }
     // úsek plný drobných ohybů, které se nehlásí → jedna informace „naplno“ místo deseti zatáček
@@ -301,6 +301,11 @@ const RallyTrack = {
     notes.push({ s: tr.len - 60, txt: 'Cíl! Naplno do cíle', kind: 'finish', sev: 9 });
     notes.sort((a, b) => a.s - b.s);
     // vzdálenosti mezi pokyny („… a 150“)
+    // „Brzda“ – ostrá zatáčka (vracák až 2) po dlouhém rychlém úseku
+    for (let q = 1; q < notes.length; q++) {
+      const a = notes[q - 1], b = notes[q];
+      if (b.kind === 'corner' && b.sev <= 2 && b.s - (a.end || a.s) > 130) b.txt = 'Brzda, ' + b.txt.charAt(0).toLowerCase() + b.txt.slice(1);
+    }
     for (let q = 0; q < notes.length - 1; q++) {
       const gap = notes[q + 1].s - (notes[q].end || notes[q].s);
       notes[q].gap = gap;

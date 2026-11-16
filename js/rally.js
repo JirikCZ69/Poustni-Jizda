@@ -57,7 +57,7 @@ const RALLY_LOOK = [
   ['spoiler', 400, 'Spoiler', 'cosm'], ['wing', 900, 'Závodní křídlo', 'cosm'], ['fenders', 600, 'Rozšířené blatníky', 'cosm'], ['stripes', 300, 'Pruhy', 'cosm'],
   ['rims_black', 300, 'Černá kola', 'cosm'], ['rims_chrome', 400, 'Chromová kola', 'cosm'], ['rims_gold', 900, 'Zlatá kola', 'cosm'],
 ];
-const RALLY_CALLS = [['Levá!', 'Digit1'], ['Pravá!', 'Digit2'], ['Vlásenka!', 'Digit3'], ['Brzdi!', 'Digit4'], ['Naplno!', 'Digit5'], ['Skok!', 'Digit6'], ['Pomalu, opatrně', 'Digit7'], ['Dobrý, dobrý!', 'Digit8']];
+const RALLY_CALLS = [['Levá!', 'Digit1'], ['Pravá!', 'Digit2'], ['Vracák!', 'Digit3'], ['Brzdi!', 'Digit4'], ['Naplno!', 'Digit5'], ['Skok!', 'Digit6'], ['Pomalu, opatrně', 'Digit7'], ['Dobrý, dobrý!', 'Digit8']];
 const RALLY_TEAM_COL = ['#ffb347', '#5ab0ff'];
 const RALLY_HIT = { tree: 4.6, joshua: 3.6, rock: 5.6, cactus: 1.2, pole: 0.25, pine: 4.8, oak: 5.2, bush: 0.3, rail: 1.3, cone: 0 };
 
@@ -529,6 +529,9 @@ const Rally = {
         const out = ctx.createBuffer(1, len, sr), o = out.getChannelData(0);
         let at = 0; bufs.forEach((b, i) => { o.set(b.buf.getChannelData(0).subarray(0, Math.min(b.buf.length, len - at)), at); at += b.buf.length + Math.round(parts[i][1] * sr); });
         this.voiceKind = male ? 'male' : 'shifted';
+        // skutečná délka „jádra“ hlášky (bez vzdálenosti na konci) – podle ní se načasuje, kdy začít mluvit
+        let core = 0; bufs.forEach((b, i) => { if (!/^\d+$/.test(parts[i][0])) core = Math.max(core, bufs.slice(0, i + 1).reduce((a, q, k) => a + q.buf.duration + (k < i ? parts[k][1] : 0), 0)); });
+        (this._vDur = this._vDur || new Map()).set(txt, core / (male ? 1 : this.VOICE_PITCH));
         return { buf: male ? out : await this.maleVoiceAsync(ctx, out, this.VOICE_PITCH), male };
       })();
       p.catch(() => this._vCache.delete(txt));
@@ -650,9 +653,13 @@ const Rally = {
     const n = notes[this.nc], dist = n.s - this.sProg;
     // spojit jen zatáčky, které na sebe navazují („…, hned“), ne zatáčku o sto metrů dál
     const chain = this.chainLen(notes, this.nc), txt = this.chainTxt(notes, this.nc, chain);
-    // kdy hlásit: tak, aby věta skončila ~1 s před nájezdem do zatáčky – delší věta začne dřív, krátká později
-    const talk = 0.25 + this.speechText(txt).length * 0.11;   // změřená délka namluvených hlášek (~0,11 s na znak)
-    const lead = U.clamp(10 + v * (talk + 1.0), 40, 160);
+    // kdy hlásit: jádro věty („Levá 3, utahuje se“ – vzdálenost na konci se počítá až za zatáčkou) má doznít
+    // chvilku před místem, kde se musí začít brzdit → řidič to slyší akorát, aby stihl zareagovat
+    const sp = this.speechText(txt), dur = this._vDur && this._vDur.get(sp);
+    const talk = dur || 0.15 + sp.replace(/,\s*\d+\s*$/, '').length * 0.095;
+    let brake = 0;
+    if (n.kind === 'corner') { const vt = Math.sqrt(7 * [16, 26, 38, 55, 80, 115, 165][n.sev]); brake = Math.max(0, v * v - vt * vt) / (2 * 8); }
+    const lead = U.clamp(v * (talk + 0.35) + brake * 0.85, 18, 130);
     if (dist > lead && !force) return;
     // nepřerušovat rozjetou větu – počkat, dokud to nedořekne (jen když už zatáčka opravdu hoří, skočit do řeči)
     if (now < (this._sayEnd || 0) && dist > 12 + v * 1.1) return;
