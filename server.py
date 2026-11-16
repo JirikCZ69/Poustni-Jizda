@@ -19,6 +19,8 @@ DATA_DIR = os.environ.get('PJ_DATA') or os.path.join(ROOT, 'data')
 DB_PATH = os.path.join(DATA_DIR, 'leaderboard.json')
 SAVE_DIR = os.path.join(DATA_DIR, 'saves')     # postup hry každého účtu (rally, drag, perky…)
 TTS_DIR = os.path.join(DATA_DIR, 'tts')        # cache hlášení spolujezdce
+import hfsync                                  # záloha dat do HF datasetu (jen na hostingu)
+hfsync.restore(DATA_DIR)
 SAVE_MAX = 600_000
 MAX_USERS = 20_000
 TTS_CACHE_MAX = 8_000                          # max souborů v cache hlasu (ať nikdo nezaplní disk)
@@ -35,7 +37,7 @@ CTYPES = {'.html': 'text/html; charset=utf-8', '.js': 'application/javascript; c
 CSP = ("default-src 'self'; script-src 'self' https://cdnjs.cloudflare.com https://unpkg.com; "
        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' data: blob: https://translate.google.com; font-src 'self' data:; "
        "connect-src 'self' https://*.peerjs.com wss://*.peerjs.com; object-src 'none'; base-uri 'none'; "
-       "form-action 'self'; frame-ancestors 'self'")
+       "form-action 'self'; frame-ancestors 'self' https://huggingface.co")
 
 
 def piper_paths():
@@ -504,6 +506,7 @@ if __name__ == '__main__':
             pass
     port = int(sys.argv[1]) if len(sys.argv) > 1 else int(os.environ.get('PORT') or 8765)   # hosting (Railway…) dává port v PORT
     srv = Server(('0.0.0.0', port), Handler)
+    hfsync.start()
     print(f'Pouštní jízda běží na http://localhost:{port}  (z jiného PC: http://<IP tohoto PC>:{port})')
     try:
         srv.serve_forever()
