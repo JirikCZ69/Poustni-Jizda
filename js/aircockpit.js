@@ -6,7 +6,7 @@ const AirCockpit = {
   W: 1024, H: 384,   // plátno přístrojové desky
   // rozměry kokpitu (souřadnice těla: x vpravo, y nahoru, z dozadu)
   dims(id) {
-    if (id === 'cmelak') return { D: 0.62, PW: 1.0, PH: 0.33, hw: 0.5, floor: -0.36, sill: 0.3, roof: 1.12, ctl: 'yoke', wall: 0x8c8474, wall2: 0x6e675a, panel: '#34363a', seat: 0x5a4a3a, suit: 0x3a4a5a };
+    if (id === 'cmelak') return { D: 0.62, PW: 1.0, PH: 0.33, hw: 0.5, floor: -0.36, sill: 0.42, roof: 1.27, ctl: 'yoke', wall: 0x8c8474, wall2: 0x6e675a, panel: '#34363a', seat: 0x5a4a3a, suit: 0x3a4a5a };
     if (id === 'sokol') return { D: 0.6, PW: 0.76, PH: 0.31, hw: 0.4, floor: -0.32, sill: 0.5, ctl: 'stick', wall: 0x3c3f45, wall2: 0x2a2c30, panel: '#202226', seat: 0x2a2a2a, suit: 0x8a2a2a };
     return { D: 0.64, PW: 0.88, PH: 0.33, hw: 0.58, floor: -0.28, sill: 0.74, ctl: 'stick', wall: 0x5f6b55, wall2: 0x48523f, panel: '#1c1c1e', seat: 0x4a3a2a, suit: 0x4a5a3a };
   },

@@ -246,26 +246,49 @@ const RallyTrack = {
 
   // ---------- rozpis spolujezdce ----------
   paceNotes(tr) {
-    const P = tr.pts, notes = [], TH = 1 / 230;
-    let i = 0;
-    while (i < P.length) {
-      if (Math.abs(P[i].k) < TH) { i++; continue; }
-      const sg = Math.sign(P[i].k); let j = i, maxK = 0, firstMax = 0, half;
-      while (j < P.length && (Math.sign(P[j].k) === sg && Math.abs(P[j].k) > TH * 0.6)) { maxK = Math.max(maxK, Math.abs(P[j].k)); j++; }
-      half = Math.floor((i + j) / 2);
-      for (let q = i; q < half; q++) firstMax = Math.max(firstMax, Math.abs(P[q].k));
-      let secondMax = 0; for (let q = half; q < j; q++) secondMax = Math.max(secondMax, Math.abs(P[q].k));
-      const R = 1 / maxK, len = (j - i) * RT_STEP, angle = Math.abs(P[Math.min(j, P.length - 1)].t - P[i].t);
-      if (angle > 0.14) {
-        const dirTxt = sg > 0 ? 'Pravá' : 'Levá';
-        let sev = R < 22 ? 0 : R < 33 ? 1 : R < 48 ? 2 : R < 68 ? 3 : R < 98 ? 4 : R < 140 ? 5 : 6;
-        let txt = sev === 0 ? `Vlásenka ${sg > 0 ? 'pravá' : 'levá'}` : `${dirTxt} ${sev}`;
-        if (len > 90 && sev > 0) txt += ' dlouhá';
-        if (secondMax > firstMax * 1.45) txt += ', utahuje se';
-        else if (firstMax > secondMax * 1.45) txt += ', otevírá';
-        notes.push({ s: P[i].s, end: P[Math.min(j, P.length - 1)].s, dir: sg, sev, txt, kind: 'corner' });
-      }
+    const P = tr.pts, n = P.length, notes = [];
+    // vyhlazená křivost (okno ~28 m) – drobné cuknutí silnice nerozseká jednu zatáčku na několik
+    const ks = new Float32Array(n);
+    for (let i = 0; i < n; i++) { let a = 0, c = 0; for (let q = Math.max(0, i - 3); q <= Math.min(n - 1, i + 3); q++) { a += P[q].k; c++; } ks[i] = a / c; }
+    const dAng = (i, j) => { let d = P[j].t - P[i].t; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; return Math.abs(d); };
+    // úseky stejného směru zatáčení; mezery kratší než ~12 m se spojí
+    const TH = 1 / 260, segs = [];
+    for (let i = 0; i < n;) {
+      if (Math.abs(ks[i]) < TH) { i++; continue; }
+      const sg = Math.sign(ks[i]); let j = i;
+      while (j < n && Math.sign(ks[j]) === sg && Math.abs(ks[j]) > TH * 0.5) j++;
+      const last = segs[segs.length - 1];
+      if (last && last.sg === sg && i - last.j <= 3) last.j = j; else segs.push({ i, j, sg });
       i = j + 1;
+    }
+    const skipped = [];
+    for (const g of segs) {
+      const { i, sg } = g, j = Math.min(g.j, n - 1);
+      let maxK = 0, mi = i; for (let q = i; q < j; q++) if (Math.abs(ks[q]) > maxK) { maxK = Math.abs(ks[q]); mi = q; }
+      const R = 1 / Math.max(1e-6, maxK), len = (j - i) * RT_STEP, angle = dAng(i, j);
+      const sev = R < 22 ? 0 : R < 33 ? 1 : R < 48 ? 2 : R < 68 ? 3 : R < 98 ? 4 : R < 140 ? 5 : 6;
+      // hlásí se jen to, kvůli čemu se musí ubrat nebo zatočit: mírné zatáčky jen když jsou dlouhé (velký úhel)
+      const need = [0.2, 0.22, 0.26, 0.38, 0.48, 0.62, 0.85][sev];
+      if (angle < need) { skipped.push(P[i].s); continue; }
+      // místo hlášení = nájezd do zatáčky (křivost dosáhne půlky maxima), ne první náznak ohybu
+      let ti = i; while (ti < mi && Math.abs(ks[ti]) < maxK * 0.5) ti++;
+      const half = Math.floor((ti + j) / 2);
+      let firstMax = 0, secondMax = 0;
+      for (let q = ti; q < half; q++) firstMax = Math.max(firstMax, Math.abs(ks[q]));
+      for (let q = half; q < j; q++) secondMax = Math.max(secondMax, Math.abs(ks[q]));
+      const dirTxt = sg > 0 ? 'Pravá' : 'Levá';
+      let txt = sev === 0 ? `Vlásenka ${sg > 0 ? 'pravá' : 'levá'}` : `${dirTxt} ${sev}`;
+      if (len > 90 && sev > 0) txt += ' dlouhá';
+      if (secondMax > firstMax * 1.5) txt += ', utahuje se';
+      else if (firstMax > secondMax * 1.5) txt += ', otevírá';
+      notes.push({ s: P[ti].s, end: P[j].s, dir: sg, sev, txt, kind: 'corner' });
+    }
+    // úsek plný drobných ohybů, které se nehlásí → jedna informace „naplno“ místo deseti zatáček
+    for (let q = 0; q < skipped.length;) {
+      let e = q; while (e + 1 < skipped.length && skipped[e + 1] - skipped[e] < 90) e++;
+      const s0 = skipped[q], s1 = skipped[e];
+      if (e - q >= 2 && !notes.some(nn => nn.kind === 'corner' && nn.s > s0 - 30 && nn.s < s1 + 10)) notes.push({ s: s0, end: s1, txt: 'Mírně klikatá, naplno', kind: 'flat', sev: 8 });
+      q = e + 1;
     }
     for (const sj of tr.jumps) notes.push({ s: sj - 25, txt: 'Skok! Rovně, drž stopu', kind: 'jump', sev: 9 });
     // horizonty (vypouklé místo, kde není vidět dál)

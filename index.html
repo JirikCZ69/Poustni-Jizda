@@ -44,16 +44,23 @@
   #menu #best.mmStat { margin:0; opacity:1; font-size:13px; color:#ffcf86; padding:0 16px; font-weight:700; }
   .mmCard::before { content:'▶'; position:absolute; right:14px; bottom:14px; width:30px; height:30px; border-radius:50%; background:var(--ac); color:#fff; font-size:12px; display:flex; align-items:center; justify-content:center; opacity:.35; transform:scale(.8); transition:.18s; z-index:2; }
   .mmCard:hover::before { opacity:1; transform:scale(1); }
-  .mmBar { display:grid; grid-template-columns:repeat(4, minmax(0,1fr)); gap:10px; width:min(1120px,100%); margin-top:14px; }
-  .mmSmall { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto auto; column-gap:10px; align-items:center; text-align:left; padding:10px 14px; border-radius:12px; cursor:pointer; font:inherit; color:#f4e9d2;
+  .mmBar { display:grid; grid-template-columns:repeat(6, minmax(0,1fr)); gap:10px; width:min(1120px,100%); margin-top:14px; }
+  .mmSmall { display:grid; grid-template-columns:auto 1fr; grid-template-rows:auto auto; column-gap:10px; align-items:center; text-align:left; padding:9px 12px; border-radius:12px; cursor:pointer; font:inherit; color:#f4e9d2; min-width:0;
     background:rgba(30,18,8,.72); border:1px solid rgba(255,207,134,.18); backdrop-filter:blur(4px); transition:background .15s, border-color .15s, transform .15s; }
   .mmSmall:hover, .mmSmall:focus-visible { background:rgba(70,40,14,.85); border-color:#ffcf86; transform:translateY(-2px); outline:none; }
-  .mmSmall i { grid-row:1 / 3; font-style:normal; font-size:24px; } .mmSmall b { font-size:15px; } .mmSmall span { font-size:12px; opacity:.65; }
-  .mmLow { display:grid; grid-template-columns:1.4fr 1fr; gap:14px; width:min(1120px,100%); margin-top:14px; align-items:start; }
-  #menu .mmLow #perks { margin:0; max-width:none; width:auto; box-sizing:border-box; }
-  #menu .mmKeys { margin:0; max-width:none; text-align:left; background:var(--panel); padding:12px 16px; border-radius:8px; } #menu .mmKeys .keys { margin-top:10px; padding:0; background:none; }
-  @media (max-width:900px) { .mmModes { grid-template-columns:repeat(2, minmax(0,1fr)); } .mmBar { grid-template-columns:repeat(2, minmax(0,1fr)); } .mmLow { grid-template-columns:1fr; } }
-  @media (max-width:480px) { .mmModes { gap:10px; } .mmDesc { display:none; } }
+  .mmSmall i { grid-row:1 / 3; font-style:normal; font-size:22px; } .mmSmall b { font-size:14.5px; white-space:nowrap; } .mmSmall span { font-size:11.5px; opacity:.65; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  #mmModal { display:none; position:fixed; inset:0; z-index:30; background:rgba(10,5,0,.6); backdrop-filter:blur(3px); align-items:center; justify-content:center; padding:16px; box-sizing:border-box; }
+  #mmModal.on { display:flex; }
+  .mmModalBox { position:relative; width:min(680px,100%); max-height:100%; overflow-y:auto; background:#21140a; border:1px solid rgba(255,207,134,.3); border-radius:14px; box-shadow:0 20px 60px rgba(0,0,0,.6); text-align:left; }
+  .mmClose { position:absolute; top:8px; right:8px; width:34px; height:34px; border-radius:50%; border:0; background:rgba(255,255,255,.08); color:#f4e9d2; font-size:16px; cursor:pointer; z-index:1; } .mmClose:hover { background:rgba(255,255,255,.18); }
+  #menu #mmModal #perks { margin:0; max-width:none; width:auto; box-sizing:border-box; background:none; padding:16px 20px; }
+  #mmKeys { padding:16px 20px; } #mmKeys h3 { margin:0 0 6px; color:#ffcf86; } #mmKeys .keys { margin-top:8px; max-width:none; }
+  /* menu se musí vejít na obrazovku: na nízkých oknech menší logo a nadpis */
+  @media (max-height:820px) { #menu .logo { width:min(190px,50vw); } #menu h1 { font-size:clamp(30px,4.6vw,52px); } #nickWrap { margin-bottom:8px; } }
+  @media (max-height:660px) { #menu .logo { width:140px; margin-bottom:-14px; } #menu h1 { font-size:36px; } .mmDesc { font-size:12.5px; } .mmBar { margin-top:10px; } }
+  @media (max-width:1000px) { .mmBar { grid-template-columns:repeat(3, minmax(0,1fr)); } }
+  @media (max-width:760px) { .mmModes { grid-template-columns:repeat(2, minmax(0,1fr)); } }
+  @media (max-width:480px) { .mmModes { gap:10px; } .mmDesc { display:none; } .mmBar { grid-template-columns:repeat(2, minmax(0,1fr)); gap:8px; } .mmSmall span { display:none; } .mmSmall { padding:8px 10px; } }
   #pause, #death { display:none; background:rgba(10,5,0,.7); }
   #death { background:rgba(60,0,0,.75); }
   #death h2 { font-size:56px; margin:0 0 6px; color:#ff8a7a; }
@@ -332,7 +339,6 @@
     </g>
   </svg>
   <h1>POUŠTNÍ JÍZDA</h1>
-  <p class="sub">Poskládej starou káru ve stodole a dojeď co nejdál. Zemřeš jen jednou… nebo vícekrát.</p>
   <div id="nickWrap"></div>
   <div class="mmModes">
     <button class="mmCard" id="playBtn" style="--ac:#e98b2d;--ac2:#7a3a10">
@@ -376,11 +382,13 @@
     <button class="mmSmall" id="mpBtn"><i>👥</i><b>Multiplayer</b><span>až 4 hráči</span></button>
     <button class="mmSmall" id="dealerBtn"><i>🚗</i><b>Autosalon</b><span>kup si káru</span></button>
     <button class="mmSmall" id="boardBtn"><i>🏆</i><b>Žebříček</b><span>nejlepší jezdci</span></button>
-    <button class="mmSmall" id="setBtn"><i>⚙</i><b>Nastavení</b><span>grafika, zvuk, klávesy</span></button>
+    <button class="mmSmall" id="perksBtn"><i>🔧</i><b>Dílna</b><span id="perksBtnSub">vylepšení</span></button>
+    <button class="mmSmall" id="keysBtn"><i>⌨</i><b>Ovládání</b><span>klávesy a myš</span></button>
+    <button class="mmSmall" id="setBtn"><i>⚙</i><b>Nastavení</b><span>grafika, zvuk</span></button>
   </div>
-  <div class="mmLow">
+  <div id="mmModal"><div class="mmModalBox"><button class="mmClose" id="mmClose" aria-label="Zavřít">✕</button>
     <div id="perks"></div>
-    <details class="keysWrap mmKeys"><summary>⌨ Ovládání (pěšky a v autě)</summary><div class="keys">
+    <div id="mmKeys"><h3>Ovládání (pěšky a v autě)</h3><div class="keys">
       <span><b>WASD</b> chůze / jízda</span><span><b>Myš</b> rozhlížení</span>
       <span><b>E</b> vzít / použít / nastoupit</span><span><b>G</b> zahodit věc z ruky</span>
       <span><b>Shift</b> běh</span><span><b>Mezerník</b> skok / ruční brzda</span>
@@ -390,8 +398,8 @@
       <span><b>1–8 / kolečko</b> výběr zbraně</span><span><b>R</b> nabít (pěšky)</span>
       <span><b>Drž E</b> rozebrat vrak</span><span><b>H</b> nápověda</span>
       <span><b>E se sprejem</b> přestříkat auto</span><span><b>E s doplňkem</b> spoiler, křídlo…</span>
-    </div></details>
-  </div>
+    </div></div>
+  </div></div>
 </div>
 
 <div id="race" class="overlay"><canvas id="confetti"></canvas>
@@ -429,7 +437,7 @@
   <div class="gTop"><div id="rgProfile"></div><div id="rgMoney"></div></div>
   <div class="gLeft" id="rgStats"></div>
   <div class="gRight"><div id="rgTabs"></div><div id="rgList"></div></div>
-  <div class="gBottom"><button id="rgStart" class="btn">🏁 START</button><button id="rgAi" class="btn">🏎 ZÁVOD S AI (10)</button><button id="rgMp" class="btn alt">👥 KOOP S KÁMOŠEM</button><button id="rgBoard" class="btn alt">🏆 ČASY</button><button id="rgBack" class="btn alt">← MENU</button></div>
+  <div class="gBottom"><button id="rgStart" class="btn">🏁 START</button><button id="rgAi" class="btn">🏎 ZÁVOD S AI (4)</button><button id="rgMp" class="btn alt">👥 KOOP S KÁMOŠEM</button><button id="rgBoard" class="btn alt">🏆 ČASY</button><button id="rgBack" class="btn alt">← MENU</button></div>
   <div class="gHint">Táhni myší = otáčení auta · kolečko = přiblížení</div>
 </div>
 
@@ -505,39 +513,39 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha384-CI3ELBVUz9XQO+97x6nwMDPosPR5XvsxW2ua7N1Xeygeh1IxtgqtCkGfQY9WWdHu" crossorigin="anonymous"></script>
-<script src="js/util.js?v=1794790400"></script>
-<script src="js/textures.js?v=1794790400"></script>
-<script src="js/world.js?v=1794790400"></script>
-<script src="js/props.js?v=1794790400"></script>
-<script src="js/buildings.js?v=1794790400"></script>
-<script src="js/items.js?v=1794790400"></script>
-<script src="js/dealer.js?v=1794790400"></script>
-<script src="js/carmodel.js?v=1794790400"></script>
-<script src="js/car.js?v=1794790400"></script>
-<script src="js/hands.js?v=1794790400"></script>
-<script src="js/player.js?v=1794790400"></script>
-<script src="js/hazards.js?v=1794790400"></script>
-<script src="js/audio.js?v=1794790400"></script>
-<script src="js/weapons.js?v=1794790400"></script>
-<script src="js/ambient.js?v=1794790400"></script>
-<script src="js/weather.js?v=1794790400"></script>
-<script src="js/radio.js?v=1794790400"></script>
-<script src="js/garagedecor.js?v=1794790400"></script>
-<script src="js/rallytrack.js?v=1794790400"></script>
-<script src="js/rallycar.js?v=1794790400"></script>
-<script src="js/voiceworker.js?v=1794790400"></script>
-<script src="js/rally.js?v=1794790400"></script>
-<script src="js/rallyai.js?v=1794790400"></script>
-<script src="js/airplane.js?v=1794790400"></script>
-<script src="js/planemodel.js?v=1794790400"></script>
-<script src="js/aircockpit.js?v=1794790400"></script>
-<script src="js/aircourse.js?v=1794790400"></script>
-<script src="js/air.js?v=1794790400"></script>
-<script src="js/drag.js?v=1794790400"></script>
-<script src="js/net.js?v=1794790400"></script>
-<script src="js/settings.js?v=1794790400"></script>
-<script src="js/pad.js?v=1794790400"></script>
-<script src="js/account.js?v=1794790400"></script>
-<script src="js/game.js?v=1794790400"></script>
+<script src="js/util.js?v=1794791500"></script>
+<script src="js/textures.js?v=1794791500"></script>
+<script src="js/world.js?v=1794791500"></script>
+<script src="js/props.js?v=1794791500"></script>
+<script src="js/buildings.js?v=1794791500"></script>
+<script src="js/items.js?v=1794791500"></script>
+<script src="js/dealer.js?v=1794791500"></script>
+<script src="js/carmodel.js?v=1794791500"></script>
+<script src="js/car.js?v=1794791500"></script>
+<script src="js/hands.js?v=1794791500"></script>
+<script src="js/player.js?v=1794791500"></script>
+<script src="js/hazards.js?v=1794791500"></script>
+<script src="js/audio.js?v=1794791500"></script>
+<script src="js/weapons.js?v=1794791500"></script>
+<script src="js/ambient.js?v=1794791500"></script>
+<script src="js/weather.js?v=1794791500"></script>
+<script src="js/radio.js?v=1794791500"></script>
+<script src="js/garagedecor.js?v=1794791500"></script>
+<script src="js/rallytrack.js?v=1794791500"></script>
+<script src="js/rallycar.js?v=1794791500"></script>
+<script src="js/voiceworker.js?v=1794791500"></script>
+<script src="js/rally.js?v=1794791500"></script>
+<script src="js/rallyai.js?v=1794791500"></script>
+<script src="js/airplane.js?v=1794791500"></script>
+<script src="js/planemodel.js?v=1794791500"></script>
+<script src="js/aircockpit.js?v=1794791500"></script>
+<script src="js/aircourse.js?v=1794791500"></script>
+<script src="js/air.js?v=1794791500"></script>
+<script src="js/drag.js?v=1794791500"></script>
+<script src="js/net.js?v=1794791500"></script>
+<script src="js/settings.js?v=1794791500"></script>
+<script src="js/pad.js?v=1794791500"></script>
+<script src="js/account.js?v=1794791500"></script>
+<script src="js/game.js?v=1794791500"></script>
 </body>
 </html>

@@ -94,6 +94,12 @@ const Game = {
     const cv = this.renderer.domElement;
     addEventListener('resize', () => { this.camera.aspect = innerWidth / innerHeight; this.camera.updateProjectionMatrix(); this.renderer.setSize(innerWidth, innerHeight); });
     $('playBtn').onclick = () => this.begin();
+    // dílna a ovládání v okně nad menu (menu se tak vejde na jednu obrazovku)
+    const modal = (what) => { $('perks').style.display = what === 'perks' ? '' : 'none'; $('mmKeys').style.display = what === 'keys' ? '' : 'none'; $('mmModal').classList.toggle('on', !!what); };
+    $('perksBtn').onclick = () => modal('perks'); $('keysBtn').onclick = () => modal('keys');
+    $('mmClose').onclick = () => modal(null);
+    $('mmModal').addEventListener('click', (e) => { if (e.target.id === 'mmModal') modal(null); });
+    addEventListener('keydown', (e) => { if (e.code === 'Escape' && $('mmModal').classList.contains('on')) modal(null); });
     // přezdívka (pamatuje si ji prohlížeč)
     Account.init();
     $('boardBtn').onclick = () => Account.openBoard();
@@ -531,6 +537,7 @@ const Game = {
   },
   renderPerks() {
     const xp = Perks.xp();
+    if ($('perksBtnSub')) $('perksBtnSub').textContent = xp + ' XP';
     $('perks').innerHTML = `<h3>Dílna – trvalá vylepšení · ${xp} XP</h3><div style="font-size:13px;opacity:.8;margin-bottom:6px">XP dostaneš po každé smrti: 10 XP za kilometr a 15 XP za etapu. Vylepšení platí ve všech dalších hrách.</div>` +
       PERKS.map(p => `<div class="row"><span class="nm"><b>${p.name}</b> – ${p.desc}</span>${Perks.has(p.id) ? '<span style="color:#8fd36b">✔ máš</span>' : `<button data-perk="${p.id}" ${xp < p.cost ? 'disabled' : ''}>${p.cost} XP</button>`}</div>`).join('');
     $('perks').onclick = (e) => {
@@ -558,7 +565,7 @@ const Game = {
       this.penaltyT = 60;
       $('deathReason').textContent = reason;
       $('deathXp').textContent = 'Závod pokračuje – ostatní ti mezitím ujíždějí.';
-      $('btnRestart').style.display = 'none'; $('btnRespawn').disabled = true;
+      $('btnRestart').style.display = 'none'; $('btnRespawn').style.display = ''; $('btnRespawn').disabled = true;
       if (this.uiOpen) { this.uiOpen = false; $('panel').style.display = 'none'; }
       setTimeout(() => { $('death').style.display = 'flex'; if (document.exitPointerLock) document.exitPointerLock(); }, 1200);
       return;
@@ -568,6 +575,8 @@ const Game = {
     if (km > this.best) { this.best = km; U.store.set('pj_best', km); }
     const xp = Math.floor((km - this.xpKm) * 10) + (this.stage - this.xpStage) * 15;
     this.xpKm = km; this.xpStage = this.stage; Perks.addXp(Math.max(0, xp));
+    // sólo: smrt je konečná – žádný respawn, jen nová hra
+    $('btnRespawn').style.display = 'none'; $('btnRestart').style.display = '';
     $('deathReason').textContent = reason;
     $('deathDist').textContent = `Dojel jsi ${km.toFixed(2)} km (rekord ${this.best.toFixed(2)} km)`;
     $('deathXp').textContent = `+${Math.max(0, xp)} XP do dílny (celkem ${Perks.xp()} XP)`;
@@ -575,7 +584,7 @@ const Game = {
     setTimeout(() => { $('death').style.display = 'flex'; if (document.exitPointerLock) document.exitPointerLock(); }, 1600);
   },
   respawn() {
-    if (this.penaltyT > 0) return;
+    if (!Net.active || this.penaltyT > 0) return;   // v sólo hře se po smrti nedá vrátit
     $('death').style.display = 'none';
     Hazards.clearCreatures();
     const c = this.car;
@@ -617,6 +626,8 @@ const Game = {
     if (Air.active) { Weather.silence(); Air.frame(dt); return; }
     if (Dealer.active) { Weather.silence(); Dealer.frame(dt); return; }
     Radio.setMuffle(this.playing && !this.inCar ? 1 : 0);
+    if (Player.holder) Player.holder.visible = this.playing;   // v menu žádná ruka s věcí před kamerou
+    if (!this.playing) { if (Player.fist) Player.fist.visible = false; if (Weapons.vm) Weapons.vm.visible = false; }
     if (this.playing && !this.paused && !this.uiOpen) this.update(dt);
     else if (!this.playing) { World.update(this.camera.position.x, this.camera.position.z); this.menuCam(dt); }
     this.renderer.shadowMap.needsUpdate = true;

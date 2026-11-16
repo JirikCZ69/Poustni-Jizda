@@ -1,4 +1,4 @@
-// rallyai.js – závod s AI soupeři: 10 aut na stejné etapě, hromadný start, kolize auto–auto, průběžné pořadí a výsledky
+// rallyai.js – závod s AI soupeři: 4 auta na stejné etapě, hromadný start, kolize auto–auto, průběžné pořadí a výsledky
 const RALLY_AI_N = 3;   // závod proti AI: 4 auta včetně hráče
 const RALLY_AI_NAMES = ['Pepa Kolínský', 'Míra Štěrk', 'Vláďa Turbo', 'Honza Skok', 'Zdeněk Prach', 'Láďa Drift', 'Kuba Bláto', 'Ota Šotolina', 'Franta Smyk', 'Radek Ručka', 'Tonda Výfuk', 'Petr Klopenka', 'Jarda Hrubý', 'Mirek Brzda'];
 const RALLY_AI_PAINT = [0xd81e1e, 0x1e5ad8, 0x18a048, 0xf0c020, 0xf07818, 0x8a2ad0, 0x10b8c8, 0xf0f0ea, 0x26282c, 0xe0407a, 0x6a8a20, 0xa0a4ac];
@@ -67,7 +67,8 @@ Object.assign(Rally, {
     for (const c of Object.keys(RALLY_COMPOUND)) { const g = this.stageGrip({ tire: { c, tier: 1 } }, stage); if (g > bg) { bg = g; best = c; } }
     const slots = [];
     for (let r = 0; r < 2; r++) for (const sd of [-1, 1]) slots.push({ s: 72 - r * 8.5 - (sd > 0 ? 3 : 0), lat: sd * 1.75 });
-    const meSlot = 2;   // hráč startuje ve 2. řadě – dva soupeři před ním, jeden vedle
+    const meSlot = Math.floor(Math.random() * slots.length);   // startovní pozice hráče se losuje
+    this.meSlot = meSlot;
     const names = RALLY_AI_NAMES.slice().sort(() => Math.random() - 0.5), paints = RALLY_AI_PAINT.slice().sort(() => Math.random() - 0.5);
     this.ais = [];
     let k = 0;

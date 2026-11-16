@@ -275,7 +275,9 @@ const Rally = {
       else if (this._mDrag) { dx = e.clientX - this._mx; dy = e.clientY - this._my; this._mx = e.clientX; this._my = e.clientY; }
       else return;
       const k = 0.0024 * (Settings.s.sens || 1);
-      this.lookYaw = U.clamp((this.lookYaw || 0) - dx * k, -2.6, 2.6);
+      // venkovní kamera obíhá auto dokola, z kokpitu jen otáčení hlavy
+      const ny = (this.lookYaw || 0) - dx * k;
+      this.lookYaw = this.camMode === 'chase' ? Math.atan2(Math.sin(ny), Math.cos(ny)) : U.clamp(ny, -2.6, 2.6);
       this.lookPitch = U.clamp((this.lookPitch || 0) - dy * k * (Settings.s.invertY ? -1 : 1), -0.9, 0.7);
       this.lookIdle = 0;
     });
@@ -371,7 +373,7 @@ const Rally = {
     this.my.hands = Hands.carRig(this.my.parts);
     this.clock = -5.5; this.started = false; this.finished = false; this.over = false; this.overT = 0; this._shown = false;
     this.sProg = 0; this.nc = 0; this.callT = 0; this.splitsHit = []; this.penalty = 0; this.repair = 0; this.helpOn = false; this.remoteHelp = false;
-    this.sendT = 0; this.msgT = 0; this.escT = 0; this.coLeft = false; this.aiCodriverOn = undefined; this.wheelT = 0; this._cp = null; this.tabT = 0; this.cdNext = 0; this.lastCount = 99; this.hits = 0; this.cones = 0;
+    this.sendT = 0; this.msgT = 0; this.escT = 0; this.coLeft = false; this.aiCodriverOn = undefined; this._preCall = false; this.wheelT = 0; this._cp = null; this.tabT = 0; this.cdNext = 0; this.lastCount = 99; this.hits = 0; this.cones = 0;
     if (this.role === 'codriver') this.makeTablet(this.my.parts);
     this.camMode = this.role === 'codriver' ? 'co' : (this.sv.cam || 'chase'); this.setCam(this.camMode);
     try { this.czVoice(); } catch (e) { /* bez hlasu */ }
@@ -379,7 +381,7 @@ const Rally = {
     this.say(null); this.callT = 0; $('rhCall').style.opacity = 0; $('rhCount').style.opacity = 0; $('rhRepair').style.display = 'none';
     this.msg(this.role === 'codriver' ? `Jsi spolujezdec! Řiď ${this.my.nick} hlasem – rozpis máš na tabletu v rukou (1–8 a Enter)` : opt.net && this.my.co >= 0 ? `Řídíš! ${Net.nickOf(this.my.co)} ti bude hlásit trať` : 'Spolujezdec AI hlásí zatáčky. Vydrž do cíle!', 4);
     $('rhStage').textContent = S.stage.name;
-    if (opt.ai) { this.aiSetup(); this.msg(`Závod se ${RALLY_AI_N} AI soupeři – startuješ ve druhé řadě, předjeď je!`, 4); }
+    if (opt.ai) { this.aiSetup(); { const ms = this.meSlot || 0; this.msg(`Závod se ${RALLY_AI_N} AI soupeři – los: startuješ ${ms + 1}. z 4${ms === 0 ? ' – pole position!' : ', předjeď je!'}`, 4); } }
     $('rhTabBtns').innerHTML = RALLY_CALLS.map(([t], i) => `<button data-call="${i}"><b>${i + 1}</b> ${t}</button>`).join('') + '<button data-call="-1" class="next"><b>Enter</b> další pokyn</button>';
   },
   // fyzický tablet v rukou spolujezdce (textura = plátno rozpisu)
@@ -468,6 +470,7 @@ const Rally = {
     Sfx.tone(1180, 0.06, 0.08, 'sine');
     if (voice === false || !this.sv.tts) return;
     const clean = this.speechText(txt);
+    this._sayEnd = performance.now() / 1000 + 0.4 + clean.length * 0.062;   // odhad délky věty (aby ji další pokyn neusekl)
     try {
       // spolujezdec je chlap: 1) mužský český hlas prohlížeče, 2) hlas ze serveru převedený na mužský (interkom v helmě),
       // 3) ženský český hlas prohlížeče posazený níž, 4) online hlas napřímo (níž). Anglicky nikdy.
@@ -535,7 +538,8 @@ const Rally = {
     if (v && this.isMale(v)) return;
     const tok = (this._pfTok = (this._pfTok || 0) + 1), notes = this.cur.tr.notes, cl = (t) => this.speechText(t);
     const list = [];
-    for (let i = 0; i < notes.length; i++) { list.push(cl(notes[i].txt)); if (i + 1 < notes.length) list.push(cl(notes[i].txt + ' … ' + notes[i + 1].txt)); }
+    // přesně ty věty, které spolujezdec řekne (jednotlivě i spojené navazující zatáčky)
+    for (let i = 0; i < notes.length; i++) { list.push(cl(notes[i].txt)); const k = this.chainLen(notes, i); if (k > 1) list.push(cl(this.chainTxt(notes, i, k))); }
     for (const t of list) {
       if (tok !== this._pfTok || !this.active) return;
       try { await this.voiceLoad(t); } catch (e) { return; }
@@ -610,15 +614,34 @@ const Rally = {
     Net.send({ t: 'rcall', team: this.my.id, txt });
     this.say(txt, false);
   },
-  aiCodriver() {
-    const notes = this.cur.tr.notes, v = this.my.car.speed;
-    if (this.nc < notes.length && notes[this.nc].s - this.sProg < Math.max(65, v * 3.5)) {
-      let txt = notes[this.nc].txt; this.nc++;
-      // dva blízké pokyny spoj do jedné věty
-      if (this.nc < notes.length && notes[this.nc].s - this.sProg < Math.max(65, v * 3.5) * 0.75) { txt += ' … ' + notes[this.nc].txt; this.nc++; }
-      this.say(txt);
-    }
+  aiCodriver(force) {
+    const notes = this.cur.tr.notes, v = Math.abs(this.my.car.speed), now = performance.now() / 1000;
+    // pokyny, které už jsou za autem, přeskočit (po resetu / smyku)
+    while (this.nc < notes.length && (notes[this.nc].end || notes[this.nc].s) < this.sProg - 5) this.nc++;
+    if (this.nc >= notes.length) return;
+    const n = notes[this.nc], dist = n.s - this.sProg;
+    // spojit jen zatáčky, které na sebe navazují („…, hned“), ne zatáčku o sto metrů dál
+    const chain = this.chainLen(notes, this.nc), txt = this.chainTxt(notes, this.nc, chain);
+    // kdy hlásit: tak, aby věta skončila ~1 s před nájezdem do zatáčky – delší věta začne dřív, krátká později
+    const talk = 0.4 + this.speechText(txt).length * 0.062;
+    const lead = U.clamp(10 + v * (talk + 1.0), 40, 135);
+    if (dist > lead && !force) return;
+    // nepřerušovat rozjetou větu – počkat, dokud to nedořekne (jen když už zatáčka opravdu hoří, skočit do řeči)
+    if (now < (this._sayEnd || 0) && dist > 12 + v * 1.1) return;
+    this.nc += chain;
+    this.say(txt);
   },
+  // kolik pokynů od i se řekne v jedné větě: navazující zatáčky (mezera < 35 m), nejvýš tři
+  chainLen(notes, i) {
+    let k = 1;
+    while (k < 3 && i + k < notes.length) {
+      const a = notes[i + k - 1], b = notes[i + k];
+      if (a.kind !== 'corner' || b.kind !== 'corner' || b.s - (a.end || a.s) >= 35) break;
+      k++;
+    }
+    return k;
+  },
+  chainTxt(notes, i, k) { return notes.slice(i, i + k).map(n => n.txt).join(' … '); },
 
   // ---------- smyčka ----------
   frame(dt) {
@@ -679,6 +702,11 @@ const Rally = {
     const nr = RallyTrack.nearest(tr, c.x, c.z);
     if (nr && nr.s > this.sProg && nr.s - this.sProg < 30) this.sProg = nr.s;
     this.nr = nr;
+    // první zatáčku hned za startem přečte spolujezdec už na startu (za jízdy by ji nestihl)
+    if (!this.started && !this._preCall && this.clock > -3.5 && (!this.opt.net || me.co < 0)) {
+      this._preCall = true; const n0 = tr.notes[this.nc || 0];
+      if (n0 && n0.s - this.sProg < 170) this.aiCodriver(true);
+    }
     if (go) {
       this.aiCodriverOn = !this.opt.net || me.co < 0 || this.coLeft;
       if (this.aiCodriverOn) this.aiCodriver();
@@ -983,15 +1011,14 @@ const Rally = {
   updateCam(dt) {
     const cam = this.cur.cam, ps = this.my.pose, v = Math.abs(ps.v || 0);
     cam.aspect = innerWidth / innerHeight;
-    // rozhlížení myší: po chvilce bez pohybu se pohled sám vrátí dopředu (myš zamčená = drží, dokud hýbeš)
+    // rozhlížení myší: pohled zůstane, kam ho otočíš (žádné samovolné vracení dopředu); reset = přepnutí kamery
     this.lookIdle = (this.lookIdle || 0) + dt;
-    if (this.lookIdle > 1.6) { const k = Math.min(1, dt * 2.5); this.lookYaw = (this.lookYaw || 0) * (1 - k); this.lookPitch = (this.lookPitch || 0) * (1 - k); }
     const ly = this.lookYaw || 0, lp = this.lookPitch || 0;
     if (this.camMode === 'chase') {
       const f = [Math.sin(ps.h + ly), Math.cos(ps.h + ly)], up = Math.sin(U.clamp(-lp, -0.3, 0.9));
       const dist = 6.4 * Math.cos(U.clamp(-lp, -0.3, 0.9) * 0.8);
       const want = new THREE.Vector3(ps.x - f[0] * dist, ps.y + 2.5 + up * 5, ps.z - f[1] * dist);
-      if (!this._cp) this._cp = want.clone(); else this._cp.lerp(want, Math.min(1, dt * (this.lookIdle < 1.6 ? 12 : 5)));
+      if (!this._cp) this._cp = want.clone(); else this._cp.lerp(want, Math.min(1, dt * 10));
       const gy = RallyTrack.height(this.cur.tr, this._cp.x, this._cp.z) + 0.8; if (this._cp.y < gy) this._cp.y = gy;
       cam.position.copy(this._cp);
       const sh = (this.shake || 0) * 0.2; cam.position.x += (Math.random() - 0.5) * sh; cam.position.y += (Math.random() - 0.5) * sh;
